@@ -1,0 +1,49 @@
+{
+  "name": "estante",
+  "productName": "Estante",
+  "version": "0.1.0",
+  "description": "Leitor de e-books minimalista que busca EPUBs e PDFs em acervos abertos",
+  "type": "module",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "app": "electron .",
+    "dist": "electron-builder --mac dmg"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "epubjs": "^0.3.93",
+    "fast-xml-parser": "^5.11.2",
+    "jszip": "^3.10.2",
+    "pdfjs-dist": "^6.4.299"
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "local.estante.app",
+    "productName": "Estante",
+    "files": [
+      "electron/**",
+      "server/**",
+      "public/**",
+      "package.json",
+      "!node_modules/@napi-rs/**"
+    ],
+    "npmRebuild": false,
+    "mac": {
+      "category": "public.app-category.books",
+      "target": "dmg",
+      "icon": "build/icon.png",
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "Estante"
+    }
+  }
+}

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Estante</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect x='5' y='6' width='5' height='20' rx='1' fill='%23b0532c'/><rect x='12' y='4' width='5' height='22' rx='1' fill='%23b0532c' opacity='.7'/><rect x='19.5' y='7' width='5' height='19' rx='1' transform='rotate(-12 22 16)' fill='%23b0532c' opacity='.45'/></svg>">
+  <script>
+    // Desktop app (electron/main.js): the header doubles as the window's title bar.
+    // Set before first paint; the overlay goes away in full screen.
+    (() => {
+      const wco = navigator.windowControlsOverlay;
+      const sync = () => document.documentElement.classList.toggle('titlebar', !!wco?.visible);
+      wco?.addEventListener('geometrychange', sync);
+      sync();
+    })();
+  </script>
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/reader.css">
+  <script type="module" src="/js/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/" aria-label="Estante — início">Estante</a>
+    <form class="search" id="search-form" role="search">
+      <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+      <input id="q" type="search" name="q" placeholder="Buscar livros, autores, artigos…" autocomplete="off" enterkeyhint="search" aria-label="Buscar">
+    </form>
+    <div class="top-actions">
+      <label class="icon-btn" title="Importar EPUB ou PDF">
+        <svg class="icon"><use href="#i-plus"/></svg>
+        <input type="file" id="import" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple hidden>
+      </label>
+      <button class="icon-btn" id="open-settings" title="Fontes e catálogos"><svg class="icon"><use href="#i-sliders"/></svg></button>
+    </div>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+
+  <div id="drop" class="drop" hidden><div>Solte para adicionar à estante</div></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <dialog id="settings" class="sheet">
+    <form method="dialog" class="sheet-head">
+      <h2>Fontes</h2>
+      <button class="icon-btn" aria-label="Fechar"><svg class="icon"><use href="#i-x"/></svg></button>
+    </form>
+    <p class="muted small">Escolha onde a busca "Todas" procura. As fontes embutidas são acervos gratuitos e legais (domínio público, acesso aberto e obras publicadas pelos próprios autores), menos o Library Genesis: ele é um acervo não oficial e vem desligado.</p>
+    <ul id="source-list" class="source-list"></ul>
+    <h3>Adicionar catálogo OPDS</h3>
+    <p class="muted small">Funciona com Calibre, Calibre-Web, Kavita, Komga, COPS e outros catálogos OPDS. Para catálogos com senha, use <code>https://usuário:senha@endereço/opds</code>.</p>
+    <form id="add-catalog" class="add-catalog">
+      <input name="name" placeholder="Nome (ex.: Meu Calibre)" maxlength="60">
+      <input name="url" placeholder="https://…/opds" required inputmode="url">
+      <button class="btn primary" type="submit">Adicionar</button>
+    </form>
+  </dialog>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></symbol>
+      <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+      <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 18 9 6l5 12M5.8 14h6.4M15 18l3-7.5 3 7.5M15.9 16h4.2"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+      <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M11 8v6M8 11h6"/></symbol>
+      <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5M8 11h6"/></symbol>
+    </defs>
+  </svg>
+</body>
+</html>
