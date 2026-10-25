@@ -1,15 +1,17 @@
-// Small fetch helpers shared by every source.
+// Small fetch helpers shared by every source. They also run in the iOS app (mobile/), where
+// fetch() goes out through the app itself, so they stick to what both have.
 
 const UA = 'Estante/0.1 (leitor pessoal de e-books)';
 
 // Accepts URLs with inline credentials (https://user:pass@host/...) and turns them
 // into a Basic auth header, since fetch() refuses credentials in the URL.
-function prepare(url, headers = {}) {
+export function prepare(url, headers = {}) {
   const u = new URL(url);
   if (!/^https?:$/.test(u.protocol)) throw new Error(`Protocolo não suportado: ${u.protocol}`);
   const h = { 'User-Agent': UA, ...headers };
   if (u.username || u.password) {
-    const token = Buffer.from(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`).toString('base64');
+    const bytes = new TextEncoder().encode(`${decodeURIComponent(u.username)}:${decodeURIComponent(u.password)}`);
+    const token = btoa(String.fromCharCode(...bytes));
     h.Authorization = `Basic ${token}`;
     u.username = '';
     u.password = '';
@@ -24,13 +26,15 @@ export async function get(url, { headers, timeout = 15000 } = {}) {
     redirect: 'follow',
     signal: AbortSignal.timeout(timeout),
   });
-  if (!res.ok) {
-    const host = new URL(req.url).host;
-    const err = new Error(res.status >= 500 ? `${host} está fora do ar ou sobrecarregado (HTTP ${res.status})` : `HTTP ${res.status} em ${host}`);
-    err.status = res.status;
-    throw err;
-  }
+  if (!res.ok) throw httpError(res.status, req.url);
   return res;
+}
+
+export function httpError(status, url) {
+  const host = new URL(url).host;
+  const err = new Error(status >= 500 ? `${host} está fora do ar ou sobrecarregado (HTTP ${status})` : `HTTP ${status} em ${host}`);
+  err.status = status;
+  return err;
 }
 
 export async function getJSON(url, opts) {

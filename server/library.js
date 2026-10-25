@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { get } from './http.js';
+import { newBook, applyPatch } from './records.js';
 
 export const DATA = path.resolve(process.env.ESTANTE_DATA ?? path.join(import.meta.dirname, '..', 'data'));
 export const DIRS = {
@@ -35,7 +36,9 @@ function writeJSON(file, value) {
 }
 
 let books = await readJSON(LIB, []);
-let settings = await readJSON(SETTINGS, { catalogs: [] });
+let settings = await readJSON(SETTINGS, {});
+settings.catalogs ??= [];
+settings.collections ??= [];
 const save = () => writeJSON(LIB, books);
 
 export const list = () => [...books].sort((a, b) => (b.lastOpenedAt ?? b.addedAt).localeCompare(a.lastOpenedAt ?? a.addedAt));
@@ -116,36 +119,17 @@ export async function addFromUpload(req, filename) {
   return addRecord({ id, ...stored, cover: null, meta: { title }, source: 'local', sourceId: null });
 }
 
-async function addRecord({ id, file, format, size, cover, meta = {}, source, sourceId }) {
-  const book = {
-    id,
-    title: String(meta.title ?? 'Sem título').slice(0, 300),
-    authors: Array.isArray(meta.authors) ? meta.authors.map(String).slice(0, 5) : [],
-    year: meta.year ?? null,
-    language: meta.language ?? null,
-    format,
-    file,
-    size,
-    cover,
-    source,
-    sourceId,
-    addedAt: new Date().toISOString(),
-    lastOpenedAt: null,
-    progress: null,
-  };
+async function addRecord(fields) {
+  const book = newBook(fields);
   books.push(book);
   await save();
   return book;
 }
 
-// Only fields the reader legitimately changes.
 export async function update(id, patch) {
   const b = find(id);
   if (!b) return null;
-  if (patch.progress !== undefined) b.progress = patch.progress && { ...patch.progress, updatedAt: new Date().toISOString() };
-  if (patch.opened) b.lastOpenedAt = new Date().toISOString();
-  if (typeof patch.title === 'string' && patch.title.trim()) b.title = patch.title.trim().slice(0, 300);
-  if (Array.isArray(patch.authors)) b.authors = patch.authors.map(String).filter(Boolean).slice(0, 5);
+  applyPatch(b, patch, settings.collections);
   await save();
   return b;
 }
@@ -154,7 +138,9 @@ export async function setCover(id, req, type) {
   const b = find(id);
   if (!b) return null;
   const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg';
-  const name = `${id}.${ext}`;
+  // A new name each time: the cover URL is versioned by it and cached as immutable.
+  const name = `${id}-${Date.now().toString(36)}.${ext}`;
+  const old = b.cover;
   const chunks = [];
   let n = 0;
   for await (const c of req) {
@@ -165,6 +151,7 @@ export async function setCover(id, req, type) {
   await writeFile(path.join(DIRS.covers, name), Buffer.concat(chunks));
   b.cover = name;
   await save();
+  if (old && old !== name) await rm(path.join(DIRS.covers, old), { force: true });
   return b;
 }
 
@@ -182,6 +169,29 @@ export async function remove(id) {
 }
 
 export const exists = async (p) => !!(await stat(p).catch(() => null));
+
+// --- collections (shelves the user names; books list the ones they are in) ---
+export const collections = () => settings.collections;
+export async function addCollection(name) {
+  const same = settings.collections.find((c) => c.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+  if (same) return same;
+  const c = { id: randomUUID().slice(0, 8), name };
+  settings.collections.push(c);
+  await writeJSON(SETTINGS, settings);
+  return c;
+}
+export async function renameCollection(id, name) {
+  const c = settings.collections.find((x) => x.id === id);
+  if (!c) return null;
+  c.name = name;
+  await writeJSON(SETTINGS, settings);
+  return c;
+}
+export async function removeCollection(id) {
+  settings.collections = settings.collections.filter((c) => c.id !== id);
+  for (const b of books) if (b.collections?.includes(id)) b.collections = b.collections.filter((c) => c !== id);
+  await Promise.all([writeJSON(SETTINGS, settings), save()]);
+}
 
 // --- settings (custom OPDS catalogs) ---
 export const catalogs = () => settings.catalogs;

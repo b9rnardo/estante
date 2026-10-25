@@ -1,9 +1,11 @@
 // Desktop app: runs the same HTTP server inside Electron's main process and shows it in a window.
-import { app, BrowserWindow, Menu, dialog, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, ipcMain, nativeTheme, shell } from 'electron';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const HOST = '127.0.0.1';
+const MAC = process.platform === 'darwin';
+const ICON = path.join(import.meta.dirname, '../build/icon.png');
 let server = null; // server/index.js, imported once ESTANTE_DATA is set
 let origin = null; // http://127.0.0.1:<port>
 let win = null;
@@ -24,7 +26,7 @@ async function boot() {
   server = await import('../server/index.js');
   origin = `http://${HOST}:${await listen()}`;
   // `npm run app` runs the stock Electron binary: show the app's icon in the Dock instead.
-  if (!app.isPackaged) app.dock?.setIcon(path.join(import.meta.dirname, '../build/icon.png'));
+  if (!app.isPackaged) app.dock?.setIcon(ICON);
   Menu.setApplicationMenu(menu());
   createWindow();
 }
@@ -32,18 +34,26 @@ async function boot() {
 const openOutside = (url) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); };
 
 function createWindow() {
+  const dark = nativeTheme.shouldUseDarkColors;
   win = new BrowserWindow({
     title: 'Estante',
     width: 1200,
     height: 820,
     minWidth: 380,
     minHeight: 480,
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#141413' : '#faf9f6', // --bg in public/css/app.css
+    backgroundColor: dark ? '#141413' : '#faf9f6', // --bg in public/css/app.css
     // No native title bar: the app's own 52px header takes its place, with the traffic
     // lights centered in its left corner (see the .titlebar class in public/index.html and css/).
+    // Windows and Linux draw their caption buttons over the right corner instead, in
+    // colours the page keeps in step with what is under them (preload.cjs).
     titleBarStyle: 'hidden',
-    titleBarOverlay: { height: 52 },
+    titleBarOverlay: MAC
+      ? { height: 52 }
+      : { height: 52, color: dark ? '#141413' : '#faf9f6', symbolColor: dark ? '#ecebe6' : '#1c1b19' }, // --bg, --text
     trafficLightPosition: { x: 18, y: 18 }, // y is ignored: the overlay height centers them
+    ...(!MAC && { webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') } }),
+    // The packaged app has its icon in the .exe; `npm run app` on Windows/Linux needs it here.
+    ...(!MAC && !app.isPackaged && { icon: ICON }),
     show: false,
   });
   win.once('ready-to-show', () => win.show());
@@ -76,6 +86,13 @@ function createWindow() {
   win.loadURL(`${origin}/`);
 }
 
+// Colours for the caption buttons, from public/js/titlebar.js through preload.cjs.
+ipcMain.on('titlebar-colors', (event, color, symbolColor) => {
+  try {
+    BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({ color, symbolColor });
+  } catch { /* not a CSS colour */ }
+});
+
 function showWindow() {
   if (!origin) return; // still starting up
   if (!win) return createWindow();
@@ -86,7 +103,9 @@ function showWindow() {
 function menu() {
   const sep = { type: 'separator' };
   return Menu.buildFromTemplate([
-    {
+    // On Windows and Linux the menu bar stays hidden (there is no title bar to hold it),
+    // so only its shortcuts count; the app menu and the Mac-only roles are left out.
+    ...(MAC ? [{
       label: app.name,
       submenu: [
         { role: 'about', label: 'Sobre a Estante' },
@@ -99,7 +118,7 @@ function menu() {
         sep,
         { role: 'quit', label: 'Encerrar Estante' },
       ],
-    },
+    }] : []),
     {
       label: 'Editar',
       submenu: [
@@ -130,10 +149,9 @@ function menu() {
       role: 'window',
       submenu: [
         { role: 'minimize', label: 'Minimizar' },
-        { role: 'zoom', label: 'Zoom' },
+        ...(MAC ? [{ role: 'zoom', label: 'Zoom' }] : []),
         { role: 'close', label: 'Fechar Janela' },
-        sep,
-        { role: 'front', label: 'Trazer Tudo para a Frente' },
+        ...(MAC ? [sep, { role: 'front', label: 'Trazer Tudo para a Frente' }] : []),
       ],
     },
   ]);
@@ -147,6 +165,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on('activate', showWindow); // Dock icon clicked after the window was closed
   app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
   app.on('will-quit', () => server?.stop());
+  // Same ID as the installer's shortcuts (build.appId in package.json), or Windows shows
+  // the running app apart from its pinned taskbar icon.
+  if (process.platform === 'win32' && app.isPackaged) app.setAppUserModelId('local.estante.app');
   app.whenReady().then(boot).catch((err) => {
     dialog.showErrorBox('A Estante não conseguiu abrir', err.message);
     app.quit();

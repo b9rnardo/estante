@@ -6,7 +6,6 @@ import { XMLParser } from 'fast-xml-parser';
 import { getJSON, getText, stripHtml } from '../http.js';
 import * as opds from './opds.js';
 import syosetu from './syosetu.js';
-import libgen from './libgen.js';
 
 const LANG = { por: 'pt', eng: 'en', spa: 'es', fre: 'fr', fra: 'fr', ger: 'de', deu: 'de', ita: 'it', lat: 'la' };
 const arr = (v) => (v == null ? [] : Array.isArray(v) ? v : [v]);
@@ -234,4 +233,5 @@ const ao3 = {
   },
 };
 
-export default [gutenberg, standard, archive, arxiv, ao3, syosetu, libgen];
+// Library Genesis is added by server/index.js: the iOS app leaves it out (see mobile/).
+export default [gutenberg, standard, archive, arxiv, ao3, syosetu];

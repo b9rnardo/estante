@@ -56,10 +56,13 @@ code { font-size: 0.88em; background: var(--hover); padding: 0.1em 0.35em; borde
 .icon { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
 /* ---------- header ---------- */
+/* On an iPhone or iPad (the iOS app, or Safari with viewport-fit=cover) the page runs under
+   the status bar, the notch and the home indicator: the header, the margins and the toasts
+   keep clear of them. The safe-area insets are 0 everywhere else. */
 .top {
   position: sticky; top: 0; z-index: 10;
   display: grid; grid-template-columns: 1fr minmax(0, 560px) 1fr; align-items: center; gap: 16px;
-  padding: 14px var(--gutter);
+  padding: max(14px, env(safe-area-inset-top) + 6px) max(var(--gutter), env(safe-area-inset-right)) 14px max(var(--gutter), env(safe-area-inset-left));
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: saturate(1.4) blur(12px);
   -webkit-backdrop-filter: saturate(1.4) blur(12px);
@@ -80,15 +83,27 @@ code { font-size: 0.88em; background: var(--hover); padding: 0.1em 0.35em; borde
 .top-actions { display: flex; gap: 4px; justify-self: end; }
 
 /* Desktop app: there is no native title bar, so the header takes its place, as a
-   52px toolbar with the window buttons in the corner that env(titlebar-area-x) skips. */
+   52px toolbar around the window buttons: the traffic lights on the left on a Mac,
+   the caption buttons on the right on Windows and Linux. These are the widths they
+   take from the viewport's top corners (0 on the side without buttons). */
+.titlebar {
+  --titlebar-left: env(titlebar-area-x, 0px);
+  --titlebar-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw));
+}
 .titlebar .top {
   height: env(titlebar-area-height, 52px);
-  padding: 0 14px 0 calc(env(titlebar-area-x, 0px) + 6px);
+  padding: 0 calc(var(--titlebar-right) + 14px) 0 max(var(--titlebar-left) + 6px, 14px);
   app-region: drag;
 }
 .titlebar .top :is(.brand, .search, .top-actions), .titlebar :is(dialog, .drop) { app-region: no-drag; }
 .titlebar .search input { height: 34px; }
 .titlebar .top-actions .icon-btn { width: 34px; height: 34px; }
+
+/* iOS app: a tap doesn't flash grey, and a long press on a cover or a button neither
+   selects it nor opens a link preview. Fields and the book's text stay selectable. */
+.native { -webkit-tap-highlight-color: transparent; }
+.native body { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+.native :is(input, textarea, .r-view) { -webkit-user-select: text; user-select: text; }
 
 .icon-btn {
   display: inline-grid; place-items: center; width: 38px; height: 38px;
@@ -118,7 +133,7 @@ code { font-size: 0.88em; background: var(--hover); padding: 0.1em 0.35em; borde
 }
 @keyframes spin { to { rotate: 360deg; } }
 
-main { padding: 8px var(--gutter) 80px; max-width: 1200px; margin: 0 auto; outline: none; }
+main { padding: 8px max(var(--gutter), env(safe-area-inset-right)) calc(80px + env(safe-area-inset-bottom)) max(var(--gutter), env(safe-area-inset-left)); max-width: 1200px; margin: 0 auto; outline: none; }
 
 /* ---------- library ---------- */
 .section-title { display: flex; align-items: baseline; gap: 10px; margin: 28px 0 18px; }
@@ -143,14 +158,40 @@ main { padding: 8px var(--gutter) 80px; max-width: 1200px; margin: 0 auto; outli
 .book:hover .cover { translate: 0 -3px; }
 .book .title { margin-top: 10px; font: 600 14px/1.3 var(--serif); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .book .meta { font-size: 12.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-.book .remove {
+.book .book-menu {
   position: absolute; top: 6px; right: 6px; width: 30px; height: 30px;
   background: rgba(20, 18, 15, .62); color: #fff; opacity: 0; backdrop-filter: blur(4px);
 }
-.book:hover .remove, .book .remove:focus-visible { opacity: 1; }
-.book .remove:hover { background: var(--danger); color: #fff; }
-.book .remove .icon { width: 16px; height: 16px; }
-@media (hover: none) { .book .remove { opacity: .85; } }
+.book:hover .book-menu, .book .book-menu:focus-visible, .book .book-menu[aria-expanded="true"] { opacity: 1; }
+.book .book-menu:hover, .book .book-menu[aria-expanded="true"] { background: rgba(20, 18, 15, .85); color: #fff; }
+.book .book-menu .icon { width: 16px; height: 16px; }
+@media (hover: none) { .book .book-menu { opacity: .85; } }
+.book .done { display: flex; align-items: center; gap: 4px; margin-top: 5px; font-size: 12px; font-weight: 600; color: var(--accent); }
+.book .done .icon { width: 14px; height: 14px; stroke-width: 2.4; }
+
+/* Filters, order and the text filter above the grid. */
+.shelf-chips { padding-top: 24px; }
+.chip .n { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.chip[aria-pressed="true"] .n { color: inherit; opacity: .6; }
+.chip .icon { width: 15px; height: 15px; margin-left: -3px; }
+.chip-add { border-style: dashed; }
+.chip-sep { flex: none; width: 1px; margin: 7px 4px; background: var(--line); }
+.shelf-title { align-items: center; flex-wrap: wrap; row-gap: 12px; margin-top: 16px; }
+.shelf-title h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shelf-title .icon-btn { width: 30px; height: 30px; margin-left: -6px; }
+.shelf-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.shelf-filter { position: relative; display: block; }
+.shelf-filter .icon { position: absolute; left: 11px; top: 50%; translate: 0 -50%; width: 15px; height: 15px; color: var(--faint); pointer-events: none; }
+.shelf-filter input {
+  width: 220px; height: 32px; padding: 0 12px 0 32px; font-size: 13px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.shelf-filter input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.shelf-filter input::-webkit-search-cancel-button { display: none; }
+.shelf-sort .icon { width: 16px; height: 16px; margin-left: -2px; color: var(--muted); }
+.grid > .shelf-empty { grid-column: 1 / -1; margin: 0; }
+.shelf-empty .icon { width: 16px; height: 16px; vertical-align: -3px; }
 
 .cover {
   position: relative; aspect-ratio: 2 / 3; border-radius: 4px; overflow: hidden;
@@ -218,7 +259,7 @@ main { padding: 8px var(--gutter) 80px; max-width: 1200px; margin: 0 auto; outli
 .note.error { color: var(--danger); }
 
 @media (max-width: 640px) {
-  .top { grid-template-columns: 1fr auto; row-gap: 10px; padding-block: 10px; }
+  .top { grid-template-columns: 1fr auto; row-gap: 10px; padding-top: max(10px, env(safe-area-inset-top) + 4px); padding-bottom: 10px; }
   .search { grid-column: 1 / -1; grid-row: 2; }
   .grid { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 22px 14px; }
   .result { grid-template-columns: 44px minmax(0, 1fr); row-gap: 10px; }
@@ -227,6 +268,9 @@ main { padding: 8px var(--gutter) 80px; max-width: 1200px; margin: 0 auto; outli
   .result .desc { -webkit-line-clamp: 1; }
   .continue { padding: 14px; gap: 14px; }
   .continue .cover { width: 56px; }
+  .shelf-tools { flex-basis: 100%; }
+  .shelf-filter { flex: 1; }
+  .shelf-filter input { width: 100%; }
 }
 
 /* ---------- settings sheet ---------- */
@@ -246,11 +290,56 @@ main { padding: 8px var(--gutter) 80px; max-width: 1200px; margin: 0 auto; outli
 .source-list .grow { flex: 1; min-width: 0; }
 .source-list input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
 .add-catalog { display: grid; gap: 8px; margin-top: 12px; }
-.add-catalog input {
-  height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); outline: none;
+:is(.add-catalog, .form, .inline-add) input:not([type="file"]) {
+  width: 100%; height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); outline: none;
 }
-.add-catalog input:focus { border-color: var(--accent); }
+:is(.add-catalog, .form, .inline-add) input:focus { border-color: var(--accent); }
 .add-catalog .btn { height: 38px; justify-self: start; }
+.add-source-actions { display: flex; gap: 8px; }
+.add-source-actions .btn { height: 38px; }
+.native .not-native { display: none; }
+
+/* Sheets made on the fly (sheet.js): a book's details and collections, names. */
+.sheet-sub { margin: 0 0 4px; }
+.sheet-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
+.sheet-actions .btn { height: 36px; padding: 0 18px; }
+.form { display: grid; gap: 14px; margin-top: 14px; }
+.form label { display: grid; gap: 6px; }
+.form label > span { font-size: 13px; font-weight: 500; color: var(--muted); }
+.form .sheet-actions { margin-top: 8px; }
+.inline-add { display: flex; gap: 8px; margin-top: 14px; }
+.inline-add .btn { height: 40px; }
+.coll-list { max-height: min(320px, 45vh); overflow-y: auto; }
+.coll-list li.muted { display: block; padding: 14px 0; }
+.edit-cover { display: flex; gap: 18px; align-items: center; margin-bottom: 4px; }
+.edit-cover .cover { width: 72px; flex: none; }
+.edit-cover .cover.placeholder { padding: 10px 7px; }
+.edit-cover .cover.placeholder .ph-title { font-size: 10px; }
+.edit-cover .cover.placeholder .ph-author { display: none; }
+.edit-cover p { margin: 8px 0 0; }
+.edit-cover .btn .icon { width: 16px; height: 16px; }
+
+/* ---------- popup menus (menu.js) ---------- */
+.menu {
+  position: fixed; z-index: 60; min-width: 210px; max-width: min(320px, calc(100vw - 16px)); padding: 5px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; outline: none;
+  box-shadow: 0 2px 6px rgba(30, 25, 15, .06), 0 18px 44px -14px rgba(30, 25, 15, .4);
+  animation: menu-in .12s ease;
+}
+.menu button {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px;
+  border: 0; border-radius: 8px; background: none; color: var(--text); font-size: 13.5px; text-align: left;
+}
+.menu button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu button .icon { width: 17px; height: 17px; color: var(--muted); }
+.menu button:hover, .menu button:focus-visible { background: var(--hover); outline: none; }
+.menu [aria-checked="false"] .icon { visibility: hidden; }
+.menu [aria-checked="true"] .icon { color: var(--accent); stroke-width: 2.2; }
+.menu .danger, .menu .danger .icon { color: var(--danger); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 6px; }
+.titlebar .menu { app-region: no-drag; }
+@keyframes menu-in { from { opacity: 0; translate: 0 -4px; } }
+@media (prefers-color-scheme: dark) { .menu { box-shadow: 0 18px 44px -14px rgba(0, 0, 0, .8); } }
 
 /* ---------- drop + toasts ---------- */
 .drop {
@@ -258,7 +347,7 @@ main { padding: 8px var(--gutter) 80px; max-width: 1200px; margin: 0 auto; outli
   background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(3px);
 }
 .drop div { padding: 28px 40px; border: 2px dashed var(--accent); border-radius: 18px; font: 600 20px var(--serif); color: var(--accent); }
-.toasts { position: fixed; left: 50%; bottom: 24px; translate: -50% 0; z-index: 100; display: grid; gap: 8px; justify-items: center; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
+.toasts { position: fixed; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom)); translate: -50% 0; z-index: 100; display: grid; gap: 8px; justify-items: center; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
 .toast {
   display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 12px;
   background: #22201c; color: #f3f1ec; font-size: 14px; box-shadow: 0 10px 30px -10px rgba(0,0,0,.5);

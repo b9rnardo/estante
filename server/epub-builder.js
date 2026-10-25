@@ -99,7 +99,7 @@ rt { font-size: .5em; }
  * @param {{ title: string, html: string, group?: string, before?: string, after?: string }[]} book.chapters
  *        `group` names the volume / arc a chapter belongs to; it nests the TOC.
  *        `before` / `after` are author's notes shown around the chapter text.
- * @returns {Promise<Buffer>}
+ * @returns {Promise<Buffer|Uint8Array>}
  */
 export async function buildEpub({ title, authors = [], language = 'en', description = '', sourceUrl = '', chapters }) {
   if (!chapters?.length) throw new Error('Nenhum capítulo para montar o livro');
@@ -189,5 +189,7 @@ ${files.map((c, i) => `<navPoint id="n${i + 1}" playOrder="${i + 1}"><navLabel><
 </package>
 `);
 
-  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 }, mimeType: 'application/epub+zip' });
+  // A Buffer on the server; bytes in the iOS app (mobile/), which has no Buffer.
+  const type = typeof Buffer === 'undefined' ? 'uint8array' : 'nodebuffer';
+  return zip.generateAsync({ type, compression: 'DEFLATE', compressionOptions: { level: 6 }, mimeType: 'application/epub+zip' });
 }

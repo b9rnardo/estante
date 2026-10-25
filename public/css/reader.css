@@ -13,14 +13,21 @@
 
 .r-top, .r-bottom { display: flex; align-items: center; gap: 6px; padding: 0 10px; transition: opacity .3s ease; }
 .reader.idle .r-top, .reader.idle .r-bottom { opacity: 0; }
-.reader.idle .r-top:hover, .reader.idle .r-bottom:hover, .reader.idle .r-top:focus-within { opacity: 1; }
+.reader.idle .r-top:focus-within { opacity: 1; }
+/* On a touch screen :hover sticks to the last thing tapped, which would keep a bar showing. */
+@media (hover: hover) { .reader.idle .r-top:hover, .reader.idle .r-bottom:hover { opacity: 1; } }
+/* Nor can a tap land on a hidden button: it goes to the page, which brings the bars back.
+   Hidden outright once faded, since iOS keeps drawing the position slider at opacity 0. */
+@media (hover: none) {
+  .reader.idle :is(.r-top, .r-bottom):not(:focus-within) { visibility: hidden; transition: opacity .3s ease, visibility 0s .3s; }
+}
 .r-title { flex: 1; min-width: 0; text-align: center; line-height: 1.2; }
 .r-title b { display: block; font: 600 14px var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .r-title span { font-size: 12px; color: var(--r-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 
 /* Desktop app: the top bar is the window's title bar too (see .titlebar in app.css). */
-.titlebar .r-top { padding-left: env(titlebar-area-x, 10px); app-region: drag; }
-.titlebar :is(.r-top button, .r-toc, .r-pop, .r-scrim.show) { app-region: no-drag; }
+.titlebar .r-top { padding: 0 calc(var(--titlebar-right) + 10px) 0 max(var(--titlebar-left), 10px); app-region: drag; }
+.titlebar :is(.r-top button, .r-toc, .r-pop, .r-scrim.show, .r-search, .r-sel, .r-card) { app-region: no-drag; }
 
 .r-bottom { gap: 14px; padding: 0 20px; }
 .r-bottom input[type="range"] { flex: 1; accent-color: var(--accent); height: 20px; min-width: 0; }
@@ -49,35 +56,198 @@
 .reader.dark .pdf-page { background: #1b1a19; box-shadow: none; }
 .reader.dark .pdf-page canvas { filter: invert(.88) hue-rotate(180deg) contrast(.95); }
 
+/* pdf.js text layer: invisible text laid over the canvas so it can be selected
+   (the parts of pdfjs-dist/web/pdf_viewer.css that the reader needs). */
+.textLayer {
+  position: absolute; inset: 0; overflow: clip; z-index: 0; line-height: 1; text-align: initial; transform-origin: 0 0;
+  -webkit-text-size-adjust: none; text-size-adjust: none; forced-color-adjust: none;
+  --min-font-size: 1; --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size)); --min-font-size-inv: calc(1 / var(--min-font-size));
+}
+.textLayer :is(span, br) { color: transparent; position: absolute; white-space: pre; cursor: text; transform-origin: 0% 0%; user-select: text; -webkit-user-select: text; }
+.textLayer > :not(.markedContent), .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1; --font-height: 0; font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1; --rotate: 0deg; transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+.textLayer .markedContent { display: contents; }
+.textLayer ::selection { background: rgba(176, 83, 44, .3); color: transparent; }
+.textLayer br::selection { background: transparent; }
+.textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; -webkit-user-select: none; }
+.textLayer.selecting .endOfContent { top: 0; }
+
 .r-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--r-muted); pointer-events: none; }
 .r-loading .spinner { width: 22px; height: 22px; }
 .r-error { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 12px; padding: 24px; color: var(--r-muted); }
 
-/* Table of contents drawer */
+/* Side panels: contents, bookmarks and notes on the left; search on the right. On an iPhone or
+   iPad the panel's colour runs under the status bar, the notch and the home indicator, and
+   its content keeps clear of them (the safe-area insets are 0 everywhere else). */
 .r-toc {
-  position: absolute; top: 0; bottom: 0; left: 0; z-index: 3; width: min(340px, 86vw);
+  position: absolute; top: 0; bottom: 0; left: 0; z-index: 3; width: calc(min(340px, 86vw) + env(safe-area-inset-left));
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom) env(safe-area-inset-left);
   background: var(--r-panel); border-right: 1px solid var(--r-line); box-shadow: 10px 0 40px -20px rgba(0,0,0,.35);
   display: flex; flex-direction: column; translate: -102% 0; transition: translate .25s ease; visibility: hidden;
 }
-.r-toc.open { translate: 0 0; visibility: visible; }
-.r-toc header { display: flex; align-items: center; justify-content: space-between; padding: 14px 10px 10px 20px; }
-.r-toc header h2 { font-size: 17px; margin: 0; }
-.titlebar .r-toc header { flex: none; height: env(titlebar-area-height, 52px); padding: 0 10px 0 calc(env(titlebar-area-x, 0px) + 6px); app-region: drag; }
-.titlebar .r-toc header button { app-region: no-drag; }
-.r-toc ol { list-style: none; margin: 0; padding: 0 8px 24px; overflow: auto; }
-.r-toc ol ol { padding: 0 0 0 14px; }
-.r-toc a {
+.r-search {
+  position: absolute; top: 0; bottom: 0; right: 0; z-index: 3; width: calc(min(360px, 92vw) + env(safe-area-inset-right));
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) 0;
+  background: var(--r-panel); border-left: 1px solid var(--r-line); box-shadow: -10px 0 40px -20px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; translate: 102% 0; transition: translate .25s ease; visibility: hidden;
+}
+.r-toc.open, .r-search.open { translate: 0 0; visibility: visible; }
+:is(.r-toc, .r-search) header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 14px 10px 10px 20px; }
+:is(.r-toc, .r-search) header h2 { font-size: 17px; margin: 0; }
+.titlebar :is(.r-toc, .r-search) header { height: env(titlebar-area-height, 52px); padding: 0 10px 0 20px; app-region: drag; }
+/* Each panel clears the window buttons on its own side and, in a narrow window, the
+   ones on the far side too (100vw - 100% is the gap between the panel and that edge). */
+.titlebar .r-toc header {
+  padding-left: max(var(--titlebar-left) + 6px, 20px);
+  padding-right: max(var(--titlebar-right) - (100vw - 100%) + 10px, 10px);
+}
+.titlebar .r-search header {
+  padding-left: max(var(--titlebar-left) - (100vw - 100%) + 6px, 20px);
+  padding-right: calc(var(--titlebar-right) + 10px);
+}
+.titlebar :is(.r-toc, .r-search) header button { app-region: no-drag; }
+.r-tabs { flex: none; margin: 0 16px 10px; }
+.r-panel-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; }
+.r-panel-body > [data-tab] { flex: 1; display: flex; flex-direction: column; }
+.r-panel-body > [hidden] { display: none; }
+.r-toc-list { list-style: none; margin: 0; padding: 0 8px 24px; }
+.r-toc-list a {
   display: block; padding: 8px 12px; border-radius: 8px; text-decoration: none; font-size: 14px; line-height: 1.35; color: var(--r-fg);
 }
-.r-toc a:hover { background: var(--r-hover); }
-.r-toc a.current { color: var(--accent); font-weight: 600; }
-.r-toc .empty-toc { padding: 8px 20px; color: var(--r-muted); font-size: 14px; }
+.r-toc-list a:hover { background: var(--r-hover); }
+.r-toc-list a.current { color: var(--accent); font-weight: 600; }
+.r-empty { padding: 10px 20px; color: var(--r-muted); font-size: 14px; line-height: 1.5; list-style: none; }
+.r-empty .icon { width: 16px; height: 16px; vertical-align: -3px; }
+
+/* Bookmark and note lists */
+.r-list { list-style: none; margin: 0; padding: 0 8px 16px; flex: 1; }
+.r-list > li:not(.r-empty) { display: flex; flex-wrap: wrap; align-items: flex-start; border-radius: 8px; }
+.r-list > li:not(.r-empty):hover { background: var(--r-hover); }
+.r-list a { flex: 1; min-width: 0; display: grid; gap: 4px; padding: 10px 4px 10px 12px; text-decoration: none; color: var(--r-fg); }
+.r-item-title { font-size: 14px; font-weight: 600; line-height: 1.3; }
+.r-item-text { font: 14px/1.45 var(--serif); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.r-item-meta { font-size: 12px; color: var(--r-muted); font-variant-numeric: tabular-nums; }
+.r-item-actions { display: flex; padding: 6px 4px 0 0; }
+.r-list .icon-btn { width: 32px; height: 32px; margin: 0; opacity: 0; transition: opacity .15s, background .15s, color .15s; }
+.r-list > li > .icon-btn { margin: 6px 4px 0 0; }
+.r-list li:hover .icon-btn, .r-list .icon-btn:focus-visible { opacity: 1; }
+.r-list .icon-btn .icon { width: 17px; height: 17px; }
+@media (hover: none) { .r-list .icon-btn { opacity: .8; } }
+.r-quote {
+  margin: 0; padding: 1px 0 1px 10px; border-left: 3px solid var(--hl, var(--accent)); font: 14.5px/1.45 var(--serif);
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+}
+.r-note-text { margin: 2px 0 0; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.r-note-edit { flex-basis: 100%; display: grid; gap: 8px; padding: 0 12px 12px; }
+[data-tab="notes"] footer {
+  position: sticky; bottom: 0; display: flex; align-items: center; gap: 6px; padding: 10px 12px 10px 20px;
+  border-top: 1px solid var(--r-line); background: var(--r-panel);
+}
+[data-tab="notes"] footer .count { flex: 1; font-size: 12.5px; color: var(--r-muted); }
+
+/* Search panel */
+.r-search-form { position: relative; flex: none; margin: 0 16px 8px; }
+.r-search-form .icon { position: absolute; left: 12px; top: 50%; translate: 0 -50%; width: 17px; height: 17px; color: var(--r-muted); pointer-events: none; }
+.r-search-form input {
+  width: 100%; height: 38px; padding: 0 14px 0 36px; border: 1px solid var(--r-line); border-radius: 999px;
+  background: var(--r-bg); color: var(--r-fg); outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.r-search-form input::-webkit-search-cancel-button { display: none; }
+.r-search-status { flex: none; min-height: 26px; padding: 0 20px 6px; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--r-muted); }
+.r-search-status .spinner { width: 12px; height: 12px; border-width: 1.5px; }
+.r-results { list-style: none; margin: 0; padding: 0 8px 24px; overflow: auto; flex: 1; min-height: 0; }
+.r-results .r-group { padding: 12px 12px 4px; font-size: 12.5px; font-weight: 600; color: var(--r-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-results a { display: grid; gap: 2px; padding: 8px 12px; border-radius: 8px; text-decoration: none; color: var(--r-fg); }
+.r-results a:hover { background: var(--r-hover); }
+.r-results a.current { background: var(--accent-soft); }
+.r-hit { font: 14px/1.45 var(--serif); overflow-wrap: anywhere; }
+.r-hit mark { background: color-mix(in srgb, var(--accent) 24%, transparent); color: inherit; border-radius: 2px; padding: 0 1px; }
 .r-scrim { position: absolute; inset: 0; z-index: 2; background: rgba(0,0,0,.18); opacity: 0; pointer-events: none; transition: opacity .25s; }
 .r-scrim.show { opacity: 1; pointer-events: auto; }
 
+/* Shared controls inside the reader, in the reader's own colours */
+.reader .btn { background: transparent; border-color: var(--r-line); color: var(--r-fg); }
+.reader .btn:hover { background: var(--r-hover); border-color: var(--r-line); }
+.reader .btn.primary { background: var(--r-fg); border-color: var(--r-fg); color: var(--r-bg); }
+.reader .btn .icon { width: 15px; height: 15px; }
+.reader textarea {
+  width: 100%; min-height: 88px; resize: vertical; padding: 10px 12px; border: 1px solid var(--r-line); border-radius: 10px;
+  background: var(--r-bg); color: var(--r-fg); font: 14px/1.5 var(--sans); outline: none; transition: border-color .15s, box-shadow .15s;
+}
+.reader :is(textarea, .r-search-form input):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.reader .seg { display: flex; border: 1px solid var(--r-line); border-radius: 10px; padding: 3px; gap: 3px; }
+.reader .seg button { flex: 1; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--r-muted); font-size: 13px; }
+.reader .seg button:hover { color: var(--r-fg); }
+.reader .seg button[aria-pressed="true"] { background: var(--r-hover); color: var(--r-fg); font-weight: 600; }
+
+/* Bookmarked page: filled icon in the bar and a ribbon that stays while the bars hide */
+.reader .r-bm-btn[aria-pressed="true"] { color: var(--accent); }
+.reader .r-bm-btn[aria-pressed="true"] .icon { fill: currentColor; }
+.r-ribbon {
+  position: absolute; top: 0; right: calc(clamp(36px, 6vw, 72px) + 8px); z-index: 1; width: 14px; height: 24px;
+  background: var(--accent); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 72%, 0 100%); pointer-events: none;
+}
+@media (hover: none) { .r-ribbon { right: 26px; } }
+
+/* Highlights. EPUB: epub.js draws them as SVG groups over the page. PDF: boxes in .pdf-marks. */
+.hl-yellow { --hl: #f6d365; }
+.hl-green { --hl: #a8d8a0; }
+.hl-blue { --hl: #a3c9ef; }
+.hl-pink { --hl: #f4a8b8; }
+.reader :is(g.hl-yellow, g.hl-green, g.hl-blue, g.hl-pink) { fill: var(--hl); fill-opacity: .55; mix-blend-mode: multiply; cursor: pointer; }
+.reader.dark :is(g.hl-yellow, g.hl-green, g.hl-blue, g.hl-pink) { fill-opacity: .3; mix-blend-mode: normal; }
+.reader g.hl-hit { stroke: var(--accent); stroke-opacity: 1; mix-blend-mode: normal; }
+.reader g.hl-hit rect { fill: var(--accent); fill-opacity: .18; }
+.reader g.hl-hit line { stroke-width: 2px; }
+.pdf-marks { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; }
+.pdf-marks .hl { position: absolute; background: var(--hl); opacity: .55; border-radius: 2px; }
+.pdf-marks .hl-hit { background: color-mix(in srgb, var(--accent) 22%, transparent); opacity: 1; box-shadow: inset 0 -2px var(--accent); }
+.reader.dark .pdf-marks { mix-blend-mode: normal; }
+.reader.dark .pdf-marks .hl:not(.hl-hit) { opacity: .32; }
+
+/* Toolbar over selected text, and the note / dictionary cards it opens */
+.r-sel {
+  position: absolute; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px;
+  background: var(--r-panel); border: 1px solid var(--r-line); border-radius: 12px; box-shadow: 0 14px 40px -14px rgba(0,0,0,.45);
+}
+.r-sel-colors { display: flex; gap: 7px; padding: 0 6px; }
+.r-sel .dot { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid rgba(0,0,0,.14); background: var(--hl); transition: scale .12s; }
+.r-sel .dot:hover { scale: 1.12; }
+.r-sel .dot[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+.r-sel-sep { width: 1px; height: 22px; margin: 0 4px; background: var(--r-line); }
+.r-sel .icon-btn { width: 34px; height: 34px; border-radius: 8px; }
+.r-sel .icon { width: 18px; height: 18px; }
+.r-sel.docked { top: auto; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 2px); translate: -50% 0; }
+.reader:has(.r-sel.docked:not([hidden])) .r-bottom { visibility: hidden; }
+.r-card {
+  position: absolute; z-index: 5; width: min(340px, calc(100% - 20px));
+  background: var(--r-panel); border: 1px solid var(--r-line); border-radius: 14px; box-shadow: 0 20px 50px -18px rgba(0,0,0,.45);
+}
+.r-note-card { display: grid; gap: 10px; padding: 14px; }
+.r-card-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.r-dict-card { width: min(380px, calc(100% - 20px)); }
+.r-dict header { display: flex; align-items: center; gap: 4px; padding: 10px 8px 4px 16px; }
+.r-dict header [data-dict="back"] { margin-left: -8px; }
+.r-dict-word { flex: 1; min-width: 0; line-height: 1.25; }
+.r-dict-word b { display: block; font: 600 20px/1.25 var(--serif); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.r-dict-word span { font-size: 12px; color: var(--r-muted); }
+.r-dict-body { max-height: min(46vh, 360px); overflow: auto; padding: 0 16px 12px; }
+.r-dict-body h4 { margin: 10px 0 4px; font-size: 11.5px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); }
+.r-dict-body ol { margin: 0; padding-left: 20px; font: 14.5px/1.5 var(--serif); }
+.r-dict-body li + li { margin-top: 4px; }
+.r-dict-body a { color: var(--accent); text-decoration: none; }
+.r-dict-body a:hover { text-decoration: underline; }
+.r-dict-note { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; color: var(--r-muted); }
+.r-dict-note .spinner { width: 12px; height: 12px; border-width: 1.5px; }
+.r-dict-source { display: flex; justify-content: space-between; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--r-line); font-size: 12.5px; color: var(--r-muted); }
+.r-dict-source a { color: var(--accent); text-decoration: none; font-weight: 500; }
+.r-dict-source a:hover { text-decoration: underline; }
+
 /* Appearance popover */
 .r-pop {
-  position: absolute; top: 56px; right: 12px; z-index: 4; width: 280px; padding: 16px;
+  position: absolute; top: calc(56px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); z-index: 4; width: 280px; padding: 16px;
   background: var(--r-panel); border: 1px solid var(--r-line); border-radius: 14px;
   box-shadow: 0 20px 50px -18px rgba(0,0,0,.45); display: grid; gap: 16px;
 }
@@ -93,9 +263,6 @@
 .r-pop .step { flex: 1; height: 36px; border-radius: 10px; border: 1px solid var(--r-line); background: transparent; color: var(--r-fg); display: grid; place-items: center; }
 .r-pop .step:hover { background: var(--r-hover); }
 .r-pop .value { min-width: 54px; text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--r-muted); }
-.r-pop .seg { display: flex; border: 1px solid var(--r-line); border-radius: 10px; padding: 3px; gap: 3px; }
-.r-pop .seg button { flex: 1; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--r-muted); font-size: 13px; }
-.r-pop .seg button[aria-pressed="true"] { background: var(--r-hover); color: var(--r-fg); font-weight: 600; }
 
 /* Single-page widths: keep lines at a comfortable reading measure. */
 @media (max-width: 1180px) { .reader[data-format="epub"] .r-view { max-width: 760px; } }

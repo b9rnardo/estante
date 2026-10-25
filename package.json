@@ -8,7 +8,11 @@
   "scripts": {
     "start": "node server/index.js",
     "app": "electron .",
-    "dist": "electron-builder --mac dmg"
+    "dist": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "ios": "node mobile/build.mjs && cap sync ios",
+    "ipa": "npm run ios && node mobile/ipa.mjs",
+    "source": "node mobile/source.mjs"
   },
   "engines": {
     "node": ">=20.11"
@@ -21,8 +25,16 @@
     "pdfjs-dist": "^6.4.299"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/file-transfer": "^2.0.6",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/share": "^8.0.3",
+    "@capacitor/status-bar": "^8.0.4",
     "electron": "^45.0.0",
-    "electron-builder": "^26.18.0"
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2"
   },
   "build": {
     "appId": "local.estante.app",
@@ -44,6 +56,18 @@
     },
     "dmg": {
       "title": "Estante"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "signExecutable": false
     }
   }
 }

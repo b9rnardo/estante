@@ -1,7 +1,10 @@
-import { api, coverUrl } from './api.js';
-import { el, esc } from './dom.js';
+import { api, coverUrl, native } from './api.js';
+import { el, esc, toast } from './dom.js';
 import { ensureCover, placeholderColor } from './covers.js';
 import { openReader } from './reader.js';
+import { openMenu, justClosed } from './menu.js';
+import { openSheet, askText } from './sheet.js';
+import { fold } from './text.js';
 
 const view = document.getElementById('view');
 const qInput = document.getElementById('q');
@@ -14,18 +17,11 @@ const PREVIEW = 4; // results per source in the "Todas" view
 
 let sources = [];
 let library = [];
+let collections = [];
 let reader = null;
 let searchAbort = null;
 
 // ---------- small helpers ----------
-const toastsEl = document.getElementById('toasts');
-function toast(message, { action, onAction, error = false, timeout = 4200 } = {}) {
-  const t = el(`<div class="toast${error ? ' error' : ''}"><span>${esc(message)}</span>${action ? `<button class="btn">${esc(action)}</button>` : ''}</div>`);
-  t.querySelector('button')?.addEventListener('click', () => { t.remove(); onAction?.(); });
-  toastsEl.append(t);
-  setTimeout(() => t.remove(), timeout);
-}
-
 const authorsText = (a) => (a?.length ? a.slice(0, 2).join(', ') + (a.length > 2 ? ' e outros' : '') : 'Autor desconhecido');
 
 function coverHTML({ title, authors, src, format }) {
@@ -78,54 +74,159 @@ const go = (hash) => { if (location.hash !== hash) location.hash = hash; else ro
 let lastNonReaderHash = '#/';
 
 // ---------- library ----------
+const pctOf = (b) => b.progress?.percent ?? 0;
+const isRead = (b) => !!b.finishedAt;
+const isStarted = (b) => !!b.lastOpenedAt || pctOf(b) > 0;
+const MORE_ICON = '<svg class="icon"><use href="#i-more"/></svg>';
+
+const STATUS = [
+  { id: 'all', label: 'Todos', test: () => true },
+  { id: 'reading', label: 'Lendo', test: (b) => !isRead(b) && isStarted(b), empty: 'Nenhum livro em andamento.' },
+  { id: 'unread', label: 'Não começados', test: (b) => !isRead(b) && !isStarted(b), empty: 'Você já começou todos os livros da estante.' },
+  { id: 'read', label: 'Lidos', test: isRead, empty: `Nenhum livro marcado como lido. Use o menu ${MORE_ICON} de um livro para marcá-lo.` },
+];
+
+const collator = new Intl.Collator('pt-BR', { sensitivity: 'base', numeric: true, ignorePunctuation: true });
+const recent = (a, b) => (b.lastOpenedAt ?? b.addedAt ?? '').localeCompare(a.lastOpenedAt ?? a.addedAt ?? '');
+const SORTS = [
+  { id: 'recent', label: 'Recentes', menu: 'Abertos recentemente', cmp: recent },
+  { id: 'added', label: 'Adicionados', menu: 'Adicionados recentemente', cmp: (a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? '') },
+  { id: 'title', label: 'Título', menu: 'Título (A–Z)', cmp: (a, b) => collator.compare(a.title, b.title) },
+  {
+    id: 'author', label: 'Autor', menu: 'Autor (A–Z)',
+    cmp: (a, b) => !a.authors[0] - !b.authors[0] || collator.compare(a.authors[0] ?? '', b.authors[0] ?? '') || collator.compare(a.title, b.title),
+  },
+  { id: 'progress', label: 'Progresso', menu: 'Progresso', cmp: (a, b) => (isRead(b) ? 1 : pctOf(b)) - (isRead(a) ? 1 : pctOf(a)) || recent(a, b) },
+];
+
+// How the shelf is sorted and filtered, remembered between visits (the text filter only for this one).
+const SHELF_KEY = 'estante.shelf';
+const shelf = { sort: 'recent', filter: 'all', q: '' };
+try { Object.assign(shelf, JSON.parse(localStorage.getItem(SHELF_KEY) ?? '{}'), { q: '' }); } catch { /* ignore */ }
+const saveShelf = () => {
+  try { localStorage.setItem(SHELF_KEY, JSON.stringify({ sort: shelf.sort, filter: shelf.filter })); } catch { /* ignore */ }
+};
+
+const inCollection = (c) => library.filter((b) => b.collections?.includes(c.id)).length;
+const sortedCollections = () => [...collections].sort((a, b) => collator.compare(a.name, b.name));
+const booksText = (n) => `${n} ${n === 1 ? 'livro' : 'livros'}`;
+
 function bookCard(b) {
-  const pct = b.progress?.percent ?? 0;
+  const pct = pctOf(b);
   const meta = [authorsText(b.authors)];
   return `
     <article class="book" data-id="${b.id}" data-title="${esc(b.title)}" data-author="${esc(b.authors[0] ?? '')}" data-format="${b.format}" tabindex="0" aria-label="${esc(b.title)}">
       ${coverHTML({ title: b.title, authors: b.authors, src: coverUrl(b), format: b.format })}
-      <button class="icon-btn remove" data-remove="${b.id}" title="Remover da estante" aria-label="Remover ${esc(b.title)}"><svg class="icon"><use href="#i-trash"/></svg></button>
+      <button class="icon-btn book-menu" data-book-menu="${b.id}" title="Opções" aria-label="Opções de ${esc(b.title)}" aria-haspopup="menu">${MORE_ICON}</button>
       <div class="title">${esc(b.title)}</div>
       <div class="meta">${esc(meta.join(' · '))}</div>
-      ${pct > 0 ? `<div class="bar" title="${Math.round(pct * 100)}% lido"><i style="width:${Math.max(2, pct * 100)}%"></i></div>` : ''}
+      ${isRead(b) ? '<div class="done"><svg class="icon"><use href="#i-check"/></svg>Lido</div>'
+        : pct > 0 ? `<div class="bar" title="${Math.round(pct * 100)}% lido"><i style="width:${Math.max(2, pct * 100)}%"></i></div>` : ''}
     </article>`;
+}
+
+function continueHTML(b) {
+  return `
+    <section class="continue" data-id="${b.id}" data-title="${esc(b.title)}" data-author="${esc(b.authors[0] ?? '')}" data-format="${b.format}" tabindex="0">
+      ${coverHTML({ title: b.title, authors: b.authors, src: coverUrl(b) })}
+      <div class="info">
+        <div class="eyebrow">Continuar lendo</div>
+        <h3>${esc(b.title)}</h3>
+        <div class="muted small">${esc(authorsText(b.authors))}</div>
+        <div class="bar"><i style="width:${Math.max(2, pctOf(b) * 100)}%"></i></div>
+      </div>
+    </section>`;
 }
 
 async function showLibrary() {
   view.dataset.view = 'library';
   try {
-    library = await api.library();
+    [library, collections] = await Promise.all([api.library(), api.collections()]);
   } catch (err) {
     view.innerHTML = `<p class="note error">Não consegui carregar a estante: ${esc(err.message)}</p>`;
     return;
   }
   if (!library.length) {
+    // A phone or tablet can't drop a file on the page; it imports with the + button.
+    const add = matchMedia('(hover: none)').matches ? 'toque em + para importar um EPUB ou PDF' : 'arraste um EPUB ou PDF para esta janela';
     view.innerHTML = `
       <section class="empty">
         <h2>Sua estante está vazia</h2>
-        <p>Busque um título lá em cima ou arraste um EPUB ou PDF para esta janela.</p>
+        <p>Busque um título lá em cima ou ${add}.</p>
         <div class="suggestions">${SUGGESTIONS.map((s) => `<button class="chip" data-suggest="${esc(s)}">${esc(s)}</button>`).join('')}</div>
       </section>`;
     return;
   }
-  const current = library.find((b) => b.lastOpenedAt && (b.progress?.percent ?? 0) < 0.98);
+  // The server lists the most recently opened first.
+  const current = library.find((b) => b.lastOpenedAt && !isRead(b) && pctOf(b) < 0.98);
   view.innerHTML = `
-    ${current ? `
-      <section class="continue" data-id="${current.id}" data-title="${esc(current.title)}" data-author="${esc(current.authors[0] ?? '')}" data-format="${current.format}" tabindex="0">
-        ${coverHTML({ title: current.title, authors: current.authors, src: coverUrl(current) })}
-        <div class="info">
-          <div class="eyebrow">Continuar lendo</div>
-          <h3>${esc(current.title)}</h3>
-          <div class="muted small">${esc(authorsText(current.authors))}</div>
-          <div class="bar"><i style="width:${Math.max(2, (current.progress?.percent ?? 0) * 100)}%"></i></div>
-        </div>
-      </section>` : ''}
-    <div class="section-title"><h2>Estante</h2><span class="count">${library.length} ${library.length === 1 ? 'livro' : 'livros'}</span></div>
-    <div class="grid">${library.map(bookCard).join('')}</div>`;
+    ${current ? continueHTML(current) : ''}
+    <nav class="chips shelf-chips" aria-label="Organizar a estante"></nav>
+    <div class="section-title shelf-title">
+      <h2></h2><span class="count"></span>
+      <button class="icon-btn" data-collection-menu aria-haspopup="menu" title="Renomear ou apagar a coleção" hidden>${MORE_ICON}</button>
+      <div class="shelf-tools">
+        <label class="shelf-filter">
+          <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+          <input type="search" placeholder="Filtrar por título ou autor" aria-label="Filtrar a estante por título ou autor" autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <button class="btn shelf-sort" data-sort-menu aria-haspopup="menu" title="Ordenar"><svg class="icon"><use href="#i-sort"/></svg><span></span></button>
+      </div>
+    </div>
+    <div class="grid"></div>`;
+  const input = view.querySelector('.shelf-filter input');
+  input.value = shelf.q;
+  input.addEventListener('input', () => { shelf.q = input.value; renderShelf(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    if (input.value) { input.value = shelf.q = ''; renderShelf(); } else input.blur();
+  });
+  renderShelf();
 
   for (const b of library.filter((x) => !x.cover)) {
     ensureCover(b).then((updated) => updated && refreshCover(updated));
   }
+}
+
+// Redraws what the filter and the order change (chips, heading, grid), leaving the text field alone.
+function renderShelf() {
+  const grid = view.querySelector('.shelf-title + .grid');
+  if (view.dataset.view !== 'library' || !grid) return;
+  const status = STATUS.find((s) => s.id === shelf.filter);
+  const coll = collections.find((c) => c.id === shelf.filter);
+  if (!status && !coll) {
+    shelf.filter = 'all';
+    return renderShelf();
+  }
+  const sort = SORTS.find((s) => s.id === shelf.sort) ?? SORTS[0];
+  const q = fold(shelf.q.trim());
+  const books = library
+    .filter((b) => (coll ? b.collections?.includes(coll.id) : status.test(b)))
+    .filter((b) => !q || fold(`${b.title} ${b.authors.join(' ')}`).includes(q))
+    .sort(sort.cmp);
+
+  const chip = (id, label, n) => `<button class="chip" data-filter="${esc(id)}" aria-pressed="${shelf.filter === id}">${esc(label)}<span class="n">${n}</span></button>`;
+  view.querySelector('.shelf-chips').innerHTML = [
+    ...STATUS.map((s) => chip(s.id, s.label, library.filter(s.test).length)),
+    '<span class="chip-sep" aria-hidden="true"></span>',
+    ...sortedCollections().map((c) => chip(c.id, c.name, inCollection(c))),
+    '<button class="chip chip-add" data-new-collection><svg class="icon"><use href="#i-plus"/></svg>Nova coleção</button>',
+  ].join('');
+  view.querySelector('.shelf-title h2').textContent = coll?.name ?? (status.id === 'all' ? 'Estante' : status.label);
+  view.querySelector('.shelf-title .count').textContent = booksText(books.length);
+  view.querySelector('[data-collection-menu]').hidden = !coll;
+  view.querySelector('.shelf-sort span').textContent = sort.label;
+
+  let empty = status?.empty;
+  if (q) empty = `Nenhum livro corresponde a “${esc(shelf.q.trim())}”.`;
+  else if (coll) empty = `Esta coleção está vazia. Para pôr um livro nela, abra o menu ${MORE_ICON} do livro e escolha <b>Coleções…</b>`;
+  // Keep keyboard focus on the same book (or its menu button) across the redraw.
+  const focused = grid.contains(document.activeElement) ? document.activeElement : null;
+  const focusId = focused?.closest('.book')?.dataset.id;
+  grid.innerHTML = books.length ? books.map(bookCard).join('') : `<p class="note shelf-empty">${empty}</p>`;
+  const card = focusId && grid.querySelector(`.book[data-id="${focusId}"]`);
+  if (card) (focused.matches('.book-menu') ? card.querySelector('.book-menu') : card).focus({ preventScroll: true });
 }
 
 function refreshCover(b) {
@@ -136,20 +237,255 @@ function refreshCover(b) {
   });
 }
 
+// ---------- organizing: book menu, collections, details ----------
+function keepBook(updated) {
+  const i = library.findIndex((x) => x.id === updated.id);
+  if (i !== -1) library[i] = updated;
+  return updated;
+}
+
+async function patchBook(b, patch) {
+  try {
+    const updated = keepBook(await api.update(b.id, patch));
+    renderShelf();
+    return updated;
+  } catch (err) {
+    toast(err.message, { error: true });
+    return null;
+  }
+}
+
+async function setFinished(b, finished) {
+  const u = await patchBook(b, { finished });
+  if (!u) return;
+  toast(finished ? `“${u.title}” está nos lidos` : `“${u.title}” voltou para a fila`, {
+    action: 'Desfazer',
+    onAction: () => patchBook(u, { finished: !finished }),
+  });
+}
+
+async function removeBook(b) {
+  if (!confirm(`Remover “${b.title}” da estante? O arquivo baixado será apagado.`)) return;
+  await api.remove(b.id).catch((err) => toast(err.message, { error: true }));
+  showLibrary();
+}
+
+function bookMenu(b, anchor) {
+  const coll = collections.find((c) => c.id === shelf.filter && b.collections?.includes(c.id));
+  openMenu(anchor, [
+    { label: isRead(b) ? 'Marcar como não lido' : 'Marcar como lido', icon: 'i-check', onSelect: () => setFinished(b, !isRead(b)) },
+    { label: 'Coleções…', icon: 'i-folder', onSelect: () => collectionsSheet(b) },
+    ...(coll ? [{ label: `Tirar de “${coll.name}”`, icon: 'i-x', onSelect: () => patchBook(b, { collections: b.collections.filter((c) => c !== coll.id) }) }] : []),
+    { label: 'Editar informações…', icon: 'i-pencil', onSelect: () => editSheet(b) },
+    '-',
+    { label: 'Remover da estante', icon: 'i-trash', danger: true, onSelect: () => removeBook(b) },
+  ], { label: b.title });
+}
+
+function sortMenu(anchor) {
+  openMenu(anchor, SORTS.map((s) => ({
+    label: s.menu,
+    checked: s.id === shelf.sort,
+    onSelect: () => { shelf.sort = s.id; saveShelf(); renderShelf(); },
+  })), { label: 'Ordenar por' });
+}
+
+async function createCollection(name) {
+  try {
+    const c = await api.addCollection(name);
+    if (!collections.some((x) => x.id === c.id)) collections.push(c);
+    return c;
+  } catch (err) {
+    toast(err.message, { error: true });
+    return null;
+  }
+}
+
+async function newCollection() {
+  const name = await askText({ title: 'Nova coleção', label: 'Nome', placeholder: 'Ex.: Clássicos, Para estudar, Favoritos', ok: 'Criar' });
+  const c = name && (await createCollection(name));
+  if (!c) return;
+  shelf.filter = c.id;
+  saveShelf();
+  renderShelf();
+}
+
+function collectionMenu(c, anchor) {
+  openMenu(anchor, [
+    { label: 'Renomear…', icon: 'i-pencil', onSelect: () => renameCollection(c) },
+    { label: 'Apagar coleção', icon: 'i-trash', danger: true, onSelect: () => deleteCollection(c) },
+  ], { label: c.name });
+}
+
+async function renameCollection(c) {
+  const name = await askText({ title: 'Renomear coleção', label: 'Nome', value: c.name });
+  if (!name || name === c.name) return;
+  try {
+    Object.assign(c, await api.renameCollection(c.id, name));
+    renderShelf();
+  } catch (err) {
+    toast(err.message, { error: true });
+  }
+}
+
+async function deleteCollection(c) {
+  const n = inCollection(c);
+  if (!confirm(`Apagar a coleção “${c.name}”?${n ? ` ${n === 1 ? 'O livro continua' : `Os ${n} livros continuam`} na estante.` : ''}`)) return;
+  try {
+    await api.removeCollection(c.id);
+  } catch (err) {
+    return toast(err.message, { error: true });
+  }
+  collections = collections.filter((x) => x !== c);
+  for (const b of library) if (b.collections?.includes(c.id)) b.collections = b.collections.filter((x) => x !== c.id);
+  shelf.filter = 'all';
+  saveShelf();
+  renderShelf();
+  toast(`Coleção “${c.name}” apagada`);
+}
+
+// Which collections a book is in: ticks apply right away; new ones can be made here too.
+function collectionsSheet(b) {
+  const d = openSheet('Coleções', `
+    <p class="muted small sheet-sub">${esc(b.title)}</p>
+    <ul class="source-list coll-list"></ul>
+    <form class="inline-add">
+      <input placeholder="Nova coleção" maxlength="60" autocomplete="off" aria-label="Nome da nova coleção">
+      <button class="btn">Criar</button>
+    </form>
+    <div class="sheet-actions"><button type="button" class="btn primary" data-close>Concluído</button></div>`);
+  const list = d.querySelector('.coll-list');
+  let ids = [...(b.collections ?? [])];
+  const draw = () => {
+    list.innerHTML = collections.length
+      ? sortedCollections().map((c) => `
+        <li>
+          <input type="checkbox" id="coll-${esc(c.id)}" data-coll="${esc(c.id)}" ${ids.includes(c.id) ? 'checked' : ''}>
+          <label class="grow" for="coll-${esc(c.id)}"><div class="name">${esc(c.name)}</div><div class="desc">${booksText(inCollection(c))}</div></label>
+        </li>`).join('')
+      : '<li class="muted small">Nenhuma coleção ainda. Crie a primeira aqui embaixo.</li>';
+  };
+  // Saves run one after another, each with every box ticked at that moment.
+  let chain = Promise.resolve();
+  const save = () => {
+    ids = [...list.querySelectorAll('[data-coll]:checked')].map((i) => i.dataset.coll);
+    const next = ids;
+    chain = chain.then(() => patchBook(b, { collections: next })).then((u) => { if (u) b = u; });
+    return chain;
+  };
+  draw();
+  list.addEventListener('change', async (e) => {
+    if (!e.target.dataset.coll) return;
+    await save();
+    draw();
+  });
+  d.querySelector('.inline-add').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = e.target.querySelector('input');
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    const c = await createCollection(name);
+    if (!c) return;
+    input.value = '';
+    if (!ids.includes(c.id)) ids.push(c.id);
+    draw();
+    await save();
+    draw();
+  });
+}
+
+function editSheet(b) {
+  let file = null;
+  let preview = null;
+  const d = openSheet('Editar informações', `
+    <form class="form">
+      <div class="edit-cover">
+        ${coverHTML({ title: b.title, authors: b.authors, src: coverUrl(b) })}
+        <div>
+          <button type="button" class="btn" data-pick-cover><svg class="icon"><use href="#i-image"/></svg>Trocar capa…</button>
+          <p class="muted small">JPG, PNG ou WebP, até 5 MB.</p>
+          <input type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        </div>
+      </div>
+      <label><span>Título</span><input name="title" value="${esc(b.title)}" maxlength="300" required autocomplete="off"></label>
+      <label><span>Autores</span><input name="authors" value="${esc(b.authors.join(', '))}" placeholder="Separe os nomes com vírgulas" autocomplete="off"></label>
+      <div class="sheet-actions">
+        <button type="button" class="btn" data-close>Cancelar</button>
+        <button class="btn primary">Salvar</button>
+      </div>
+    </form>`, { onClose: () => preview && URL.revokeObjectURL(preview) });
+  const picker = d.querySelector('input[type="file"]');
+  d.querySelector('[data-pick-cover]').addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => {
+    const f = picker.files[0];
+    picker.value = '';
+    if (!f) return;
+    if (!/^image\/(jpeg|png|webp)$/.test(f.type)) return toast('Escolha uma imagem JPG, PNG ou WebP', { error: true });
+    if (f.size > 5 * 1024 * 1024) return toast('Imagem grande demais (até 5 MB)', { error: true });
+    file = f;
+    if (preview) URL.revokeObjectURL(preview);
+    preview = URL.createObjectURL(f);
+    d.querySelector('.edit-cover .cover').replaceWith(el(coverHTML({ title: b.title, authors: b.authors, src: preview })));
+  });
+  d.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const title = form.elements.title.value.trim();
+    if (!title) return form.elements.title.focus();
+    const authors = form.elements.authors.value.split(/[,;]/).map((s) => s.trim()).filter(Boolean);
+    const btn = form.querySelector('.btn.primary');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Salvando';
+    try {
+      let u = await api.update(b.id, { title, authors });
+      if (file) u = await api.setCover(b.id, file);
+      keepBook(u);
+      d.close();
+      showLibrary(); // the "Continuar lendo" card may show this book too
+    } catch (err) {
+      toast(err.message, { error: true });
+      btn.disabled = false;
+      btn.textContent = 'Salvar';
+    }
+  });
+}
+
 view.addEventListener('click', async (e) => {
   const suggest = e.target.closest('[data-suggest]');
   if (suggest) return go(`#/busca?${new URLSearchParams({ q: suggest.dataset.suggest })}`);
 
-  const rm = e.target.closest('[data-remove]');
-  if (rm) {
+  const filter = e.target.closest('[data-filter]');
+  if (filter) {
+    shelf.filter = filter.dataset.filter;
+    saveShelf();
+    return renderShelf();
+  }
+  if (e.target.closest('[data-new-collection]')) return newCollection();
+
+  const menuButton = e.target.closest('[data-book-menu], [data-sort-menu], [data-collection-menu]');
+  if (menuButton) {
     e.stopPropagation();
-    const b = library.find((x) => x.id === rm.dataset.remove);
-    if (!b || !confirm(`Remover “${b.title}” da estante? O arquivo baixado será apagado.`)) return;
-    await api.remove(b.id).catch((err) => toast(err.message, { error: true }));
-    return showLibrary();
+    if (justClosed(menuButton)) return;
+    const d = menuButton.dataset;
+    if (d.bookMenu) {
+      const b = library.find((x) => x.id === d.bookMenu);
+      if (b) bookMenu(b, menuButton);
+    } else if ('sortMenu' in d) sortMenu(menuButton);
+    else {
+      const c = collections.find((x) => x.id === shelf.filter);
+      if (c) collectionMenu(c, menuButton);
+    }
+    return;
   }
   const card = e.target.closest('.book, .continue');
   if (card) go(`#/ler/${card.dataset.id}`);
+});
+view.addEventListener('contextmenu', (e) => {
+  const card = e.target.closest('.book, .continue');
+  const b = card && library.find((x) => x.id === card.dataset.id);
+  if (!b) return;
+  e.preventDefault();
+  bookMenu(b, { x: e.clientX, y: e.clientY });
 });
 view.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && e.target.matches('.book, .continue')) go(`#/ler/${e.target.dataset.id}`);
@@ -305,6 +641,8 @@ async function showSearch(q, active) {
   const enabled = sources.filter(isOn);
   const target = active === 'all' ? enabled : sources.filter((s) => s.id === active);
   view.innerHTML = chipsHTML(active, enabled.some((s) => s.id === active) || active === 'all' ? enabled : [...enabled, ...target]);
+  // On a phone the row scrolls sideways: keep the chosen source in sight.
+  view.querySelector('.chips [aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   view.querySelector('.chips').addEventListener('click', (e) => {
     const c = e.target.closest('[data-source]');
     if (c) go(`#/busca?${new URLSearchParams({ q, fonte: c.dataset.source })}`);
@@ -425,6 +763,7 @@ function renderSources() {
       <input type="checkbox" id="src-${esc(s.id)}" data-toggle="${esc(s.id)}" ${isOn(s) ? 'checked' : ''}>
       <label class="grow" for="src-${esc(s.id)}"><div class="name">${esc(s.name)}</div><div class="desc">${esc(s.description)}</div></label>
       ${s.kind === 'opds' ? `<button class="icon-btn" data-del="${esc(s.id.slice(5))}" title="Remover catálogo"><svg class="icon"><use href="#i-trash"/></svg></button>` : ''}
+      ${s.kind === 'external' ? `<button class="icon-btn" data-del-source="${esc(s.id.slice(4))}" title="Remover fonte"><svg class="icon"><use href="#i-trash"/></svg></button>` : ''}
     </li>`).join('');
 }
 
@@ -441,9 +780,15 @@ sourceList.addEventListener('change', (e) => {
   if (s) setOn(s, e.target.checked);
 });
 sourceList.addEventListener('click', async (e) => {
-  const del = e.target.closest('[data-del]');
+  const del = e.target.closest('[data-del], [data-del-source]');
   if (!del) return;
-  await api.removeCatalog(del.dataset.del);
+  if (del.dataset.delSource) {
+    const s = sources.find((x) => x.id === `ext:${del.dataset.delSource}`);
+    if (!confirm(`Remover a fonte “${s?.name}”? Os livros baixados dela continuam na estante.`)) return;
+    await api.removeSource(del.dataset.delSource);
+  } else {
+    await api.removeCatalog(del.dataset.del);
+  }
   sources = await api.sources();
   renderSources();
 });
@@ -467,6 +812,46 @@ document.getElementById('add-catalog').addEventListener('submit', async (e) => {
     btn.textContent = 'Adicionar';
   }
 });
+
+// iOS app: sources that don't come with it, from a link or a file (mobile/sandbox.js).
+if (native) {
+  const section = document.getElementById('add-source');
+  const linkForm = document.getElementById('add-source-link');
+  const fileInput = document.getElementById('source-file');
+  section.hidden = false;
+
+  const addSource = async (body, btn, label) => {
+    if (!confirm('Adicionar esta fonte? Ela não faz parte da Estante e você a usa por sua conta. Ela roda isolada: só busca na internet e devolve resultados.')) return false;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Verificando';
+    try {
+      const s = await api.addSource(body);
+      sources = await api.sources();
+      renderSources();
+      toast(s.optIn ? `Fonte “${s.name}” adicionada. Ligue-a na lista para ela entrar na busca “Todas”.` : `Fonte “${s.name}” adicionada`, { timeout: 6000 });
+      return true;
+    } catch (err) {
+      toast(err.message, { error: true, timeout: 7000 });
+      return false;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  };
+
+  linkForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!(await addSource({ url: linkForm.url.value.trim() }, linkForm.querySelector('[type="submit"]'), 'Adicionar'))) return;
+    linkForm.reset();
+    linkForm.url.blur(); // puts the keyboard away, so the toast shows
+  });
+  document.getElementById('pick-source').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (file) addSource({ code: await file.text() }, document.getElementById('pick-source'), 'Importar arquivo…');
+  });
+}
 
 // ---------- start ----------
 api.sources().then((s) => { sources = s; }).catch(() => {});

@@ -4,8 +4,10 @@ import { createReadStream, realpathSync } from 'node:fs';
 import { stat, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import builtin from './sources/builtin.js';
+import libgen from './sources/libgen.js';
 import { makeCatalogSource, searchTemplate } from './sources/opds.js';
 import * as lib from './library.js';
+import { define } from './dictionary.js';
 
 const PORT = Number(process.env.PORT ?? 4567);
 const HOST = process.env.HOST ?? '127.0.0.1';
@@ -29,7 +31,7 @@ const TYPES = {
 };
 
 function sources() {
-  return [...builtin.map((s) => ({ ...s, kind: 'builtin' })), ...lib.catalogs().map(makeCatalogSource)];
+  return [...[...builtin, libgen].map((s) => ({ ...s, kind: 'builtin' })), ...lib.catalogs().map(makeCatalogSource)];
 }
 
 const hideCreds = (url) => {
@@ -202,6 +204,41 @@ route('PATCH', '/api/library/([\\w-]+)', async ({ req, params }) => {
 });
 
 route('DELETE', '/api/library/([\\w-]+)', async ({ params }) => ({ ok: await lib.remove(params[0]) }));
+
+route('GET', '/api/collections', () => lib.collections());
+
+const collectionName = (name) => {
+  const n = String(name ?? '').trim().slice(0, 60);
+  if (!n) throw new HttpError(400, 'Dê um nome à coleção');
+  return n;
+};
+
+route('POST', '/api/collections', async ({ req }) => lib.addCollection(collectionName((await body(req)).name)));
+
+route('PATCH', '/api/collections/([\\w-]+)', async ({ req, params }) => {
+  const c = await lib.renameCollection(params[0], collectionName((await body(req)).name));
+  if (!c) throw new HttpError(404, 'Coleção não encontrada');
+  return c;
+});
+
+route('DELETE', '/api/collections/([\\w-]+)', async ({ params }) => {
+  await lib.removeCollection(params[0]);
+  return { ok: true };
+});
+
+route('GET', '/api/define', async ({ url }) => {
+  const word = url.searchParams.get('word')?.trim();
+  if (!word) throw new HttpError(400, 'Escolha uma palavra');
+  let found;
+  try {
+    found = await define(word, url.searchParams.get('lang'));
+  } catch (err) {
+    if (err.status === 429) throw new HttpError(503, 'O dicionário está ocupado. Tente de novo em alguns segundos.');
+    throw err;
+  }
+  if (!found) throw new HttpError(404, `“${word}” não está no dicionário`);
+  return found;
+});
 
 route('GET', '/api/catalogs', () => lib.catalogs().map((c) => ({ ...c, url: hideCreds(c.url) })));
 

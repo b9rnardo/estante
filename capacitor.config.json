@@ -1,0 +1,13 @@
+{
+  "appId": "local.estante.app",
+  "appName": "Estante",
+  "webDir": "mobile/www",
+  "backgroundColor": "#faf9f6",
+  "ios": {
+    "contentInset": "never",
+    "scrollEnabled": true
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true }
+  }
+}
