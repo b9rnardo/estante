@@ -1,17 +1,20 @@
-// Builds dist/altstore/ (npm run source -- <owner/repo>, after npm run ipa): an AltStore/SideStore
-// source with the .ipa and its icon, all to be attached to the release v<version> of a public
-// GitHub repo. AltStore then reads the source at
+// Builds dist/altstore/ (npm run source -- <owner/repo> [--notes notes.md], after npm run ipa): an
+// AltStore/SideStore source with the .ipa and its icon, all to be attached to the release
+// v<version> of a public GitHub repo. AltStore then reads the source at
 // https://github.com/<owner/repo>/releases/latest/download/source.json.
 import { execFileSync } from 'node:child_process';
 import { copyFile, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseArgs } from 'node:util';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
-const repo = process.argv[2];
+const { positionals: [repo], values: { notes } } = parseArgs({ allowPositionals: true, options: { notes: { type: 'string' } } });
 if (!/^[\w.-]+\/[\w.-]+$/.test(repo ?? '')) {
-  console.error('Uso: npm run source -- <dono/repositório>');
+  console.error('Uso: npm run source -- <dono/repositório> [--notes arquivo.md]');
   process.exit(1);
 }
+// npm runs scripts from the project folder; the notes path is relative to where it was typed.
+const whatsNew = notes && (await readFile(path.resolve(process.env.INIT_CWD ?? '.', notes), 'utf8')).trim();
 const { version, productName, description } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
 const ipa = path.join(ROOT, 'dist', `${productName}-${version}.ipa`);
 const app = path.join(ROOT, 'dist/ios-build/Build/Products/Release-iphoneos/App.app');
@@ -51,6 +54,7 @@ const source = {
       version,
       buildVersion: info.CFBundleVersion,
       date: new Date().toISOString(),
+      localizedDescription: whatsNew || undefined, // "What's New" in AltStore and SideStore
       downloadURL: `${releases}/download/v${version}/${path.basename(ipa)}`,
       size: (await stat(ipa)).size,
       minOSVersion: info.MinimumOSVersion,

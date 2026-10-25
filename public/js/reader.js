@@ -95,6 +95,15 @@ export function openReader(book, { onClose }) {
             <button data-zoom="page">Página inteira</button>
             <button data-zoom="width">Largura</button>
           </div>
+        </div>
+        <div>
+          <div class="label">Fonte</div>
+          <div class="seg">
+            <button data-pdf-font="original">Original</button>
+            <button data-pdf-font="serif" style="font-family:var(--serif)">Serifada</button>
+            <button data-pdf-font="sans">Sem serifa</button>
+          </div>
+          <p class="r-pop-note">Só neste livro: troca as fontes do PDF por uma mais legível. Não muda páginas escaneadas.</p>
         </div>` : `
         <div>
           <div class="label">Tamanho do texto</div>
@@ -252,11 +261,21 @@ export function openReader(book, { onClose }) {
     root.querySelectorAll('[data-theme]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.theme === prefs.theme)));
     root.querySelectorAll('[data-font]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.font === prefs.font)));
     root.querySelectorAll('[data-zoom]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.zoom === prefs.pdfZoom)));
+    root.querySelectorAll('[data-pdf-font]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pdfFont === (book.pdfFont ?? 'original'))));
     const size = root.querySelector('[data-size-label]');
     if (size) size.textContent = `${prefs.fontSize}%`;
     savePrefs(prefs);
     engine?.setAppearance(prefs);
     paintTitleBar();
+  }
+
+  // A PDF's font is the book's own setting, kept in its record, not a reader preference.
+  function setPdfFont(font) {
+    if (font === 'original') delete book.pdfFont;
+    else book.pdfFont = font;
+    api.update(book.id, { pdfFont: font }).catch(() => {});
+    engine?.setFont(font);
+    applyPrefs();
   }
 
   // Windows caption buttons (titlebar.js): the reader's colours, or the search panel's
@@ -310,6 +329,7 @@ export function openReader(book, { onClose }) {
     else if (t.dataset.theme) { prefs.theme = t.dataset.theme; applyPrefs(); }
     else if (t.dataset.font) { prefs.font = t.dataset.font; applyPrefs(); }
     else if (t.dataset.zoom) { prefs.pdfZoom = t.dataset.zoom; applyPrefs(); }
+    else if (t.dataset.pdfFont) setPdfFont(t.dataset.pdfFont);
     else if (t.dataset.i != null) {
       e.preventDefault();
       engine?.goTo(engine.toc[Number(t.dataset.i)].target);

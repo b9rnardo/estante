@@ -152,6 +152,17 @@ main { padding: 8px max(var(--gutter), env(safe-area-inset-right)) calc(80px + e
 .continue h3 { margin: 4px 0 2px; font-size: 19px; line-height: 1.25; }
 .continue .bar { margin-top: 12px; max-width: 320px; }
 
+/* Desktop app: a newer version to download (app.js). */
+.update {
+  display: flex; align-items: center; gap: 10px; width: fit-content; max-width: 100%;
+  margin-top: 18px; padding: 6px 6px 6px 14px; font-size: 14px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+}
+.update > .icon { width: 17px; height: 17px; color: var(--accent); }
+.update span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.update .icon-btn { width: 32px; height: 32px; margin-left: -4px; }
+.update .icon-btn .icon { width: 16px; height: 16px; }
+
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 30px 22px; }
 .book { position: relative; cursor: pointer; min-width: 0; }
 .book .cover { transition: translate .2s ease, box-shadow .2s ease; }

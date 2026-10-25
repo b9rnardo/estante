@@ -91,6 +91,12 @@ AirDrop), o macOS bloqueia na primeira vez: clique com o botão direito na Estan
 em Aplicativos e escolha **Abrir**. Se o macOS não oferecer essa opção, vá em
 **Ajustes do Sistema › Privacidade e Segurança** e clique em **Abrir Mesmo Assim**.
 
+**Versões novas.** O app não se atualiza sozinho: ao abrir, e depois uma vez por
+dia, ele consulta as [versões no GitHub](https://github.com/b9rnardo/estante/releases)
+e, se houver uma mais nova, a estante mostra "Estante X.Y.Z disponível" com o botão
+**Baixar**, que abre a página dela no navegador. Fechado no ×, o aviso só volta na
+versão seguinte.
+
 O app só aceita conexões do próprio Mac. Para ler no celular pelo navegador, use
 `npm start` (veja [Ler no celular pela rede](#ler-no-celular-pela-rede)).
 
@@ -114,6 +120,10 @@ atalhos no menu Iniciar e na área de trabalho e abre a Estante.
 **Primeira abertura.** O instalador não é assinado, então o SmartScreen avisa que
 "O Windows protegeu o computador". Clique em **Mais informações** e depois em
 **Executar assim mesmo**. O aviso só aparece na primeira vez.
+
+**Versões novas.** Como no Mac, a estante avisa quando sai uma versão mais nova no
+GitHub, com o botão **Baixar** para a página dela; fechado no ×, o aviso só volta
+na versão seguinte.
 
 **Dados.** A estante fica em `%APPDATA%\Estante\data`, separada da versão web
 (`ESTANTE_DATA` continua valendo). Para levar a estante que você já tem, feche o
@@ -331,7 +341,8 @@ abre o app Arquivos.
 
 **Aa** abre o painel de aparência: tema **claro**, **sépia** ou **escuro**, tamanho
 do texto e fonte (a original do livro, serifada ou sem serifa). No PDF, o mesmo
-painel tem o zoom. As escolhas valem para todos os livros.
+painel tem o zoom e a fonte do PDF (veja [PDF](#pdf)). As escolhas valem para todos os
+livros, menos a fonte do PDF, que é de cada livro.
 
 <table>
   <tr>
@@ -393,6 +404,13 @@ próximo resultado, ↑ volta para o anterior.
 
 PDFs abrem página a página, com os mesmos marcadores, destaques, notas e busca do
 EPUB. Em **Aa**, escolha **Página inteira** ou **Largura**, ou ajuste o zoom com − e +.
+
+**Fonte do PDF.** Para um PDF com letras enfeitadas ou difíceis de ler, escolha
+**Serifada** ou **Sem serifa** em **Aa › Fonte**. A Estante redesenha o texto da página
+nessa fonte, no mesmo lugar, e mantém imagens, tabelas, linhas e fundos. Seleção,
+destaques, notas e busca continuam funcionando. A escolha vale só para aquele livro e
+fica guardada com ele; **Original** volta às fontes do PDF. Negrito, itálico e cores do
+texto ficam de fora, e páginas escaneadas não mudam (o texto delas é uma imagem).
 
 ## Atalhos de teclado
 
@@ -485,6 +503,7 @@ o IP do computador e confira se os dois estão na mesma rede Wi-Fi.
 | `npm run ios` | prepara o app para iOS e o projeto do Xcode |
 | `npm run ipa` | `.ipa` sem assinatura, para AltStore e SideStore |
 | `npm run source -- <dono>/<repo>` | source do AltStore e SideStore em `dist/altstore/` |
+| `npm run release -- <versão>` | todos os instaladores de uma versão (veja [Lançar uma versão](#lançar-uma-versão)) |
 
 Para testar sem mexer na sua estante, aponte `ESTANTE_DATA` para outra pasta:
 
@@ -492,11 +511,27 @@ Para testar sem mexer na sua estante, aponte `ESTANTE_DATA` para outra pasta:
 ESTANTE_DATA=/tmp/estante-teste npm start
 ```
 
+### Lançar uma versão
+
+```bash
+npm run release -- 0.2.0 --notes notas.md
+```
+
+Pede um Mac com Xcode e a árvore do git sem mudanças. O comando põe a versão em
+`package.json` e `package-lock.json` e gera tudo com ela: o `.ipa` e a source em
+`dist/altstore/`, o `.dmg` e o `.exe`. O texto de `--notes` vira o "What's New" que
+o AltStore e o SideStore mostram e a descrição das releases. No fim, ele imprime
+dois `gh release create`: um para o [estante-ios](https://github.com/b9rnardo/estante-ios),
+com `dist/altstore/`, e outro para este repositório, com o `.dmg` e o `.exe`. Confira
+os arquivos, faça commit e push da versão e rode os dois (com o `gh` logado), ou
+passe `--publish` para o comando rodá-los no fim. A release mais nova do estante-ios
+é a atualização que aparece no AltStore e no SideStore.
+
 ### Estrutura
 
 ```
 electron/main.js               app para Mac e Windows: sobe o servidor e abre a janela
-electron/preload.cjs           Windows: passa as cores dos botões da janela para o processo principal
+electron/preload.cjs           passa à página o aviso de versão nova e, no Windows, as cores dos botões da janela ao processo principal
 build/icon.png                 ícone do app (desenhado em build/icon.svg)
 server/index.js                servidor HTTP (API + arquivos estáticos)
 server/library.js              estante em disco, download e validação dos arquivos
@@ -525,6 +560,7 @@ mobile/source-http.js          acesso à rede de uma fonte adicionada (só texto
 mobile/crypto.js               node:crypto para o app para iOS
 mobile/ipa.mjs                 gera o .ipa sem assinatura para AltStore e SideStore
 mobile/source.mjs              gera a source do AltStore e SideStore (source.json, ícone, .ipa)
+scripts/release.mjs            gera todos os instaladores de uma versão e as releases do GitHub
 ios/                           projeto do Xcode (Capacitor)
 docs/images/                   capturas de tela deste README
 ```

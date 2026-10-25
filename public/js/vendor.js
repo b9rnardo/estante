@@ -20,9 +20,28 @@ export async function loadEpub() {
   return window.ePub;
 }
 
+// pdf.js reads a page's text with `for await` over a ReadableStream, which WebKit (Safari, the
+// iOS app) can't do yet. Without it, PDFs there have no text to select, search or restyle.
+function streamIteration() {
+  if (typeof ReadableStream === 'undefined' || ReadableStream.prototype[Symbol.asyncIterator]) return;
+  ReadableStream.prototype[Symbol.asyncIterator] = async function* iterate() {
+    const reader = this.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield value;
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  };
+}
+
 let pdfjs;
 export async function loadPdf() {
   if (!pdfjs) {
+    streamIteration();
     // The legacy build ships polyfills, so it also runs on older Safari versions.
     pdfjs = await import('/vendor/pdfjs/legacy/build/pdf.min.mjs');
     pdfjs.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/legacy/build/pdf.worker.min.mjs';

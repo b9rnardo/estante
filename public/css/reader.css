@@ -74,6 +74,13 @@
 .textLayer .endOfContent { display: block; position: absolute; inset: 100% 0 0; z-index: 0; cursor: default; user-select: none; -webkit-user-select: none; }
 .textLayer.selecting .endOfContent { top: 0; }
 
+/* A PDF in a font of the reader's choice (pdf-engine.js): the canvas has no text, and the text
+   layer shows it, in the ink of each theme (the canvas filters above don't reach it). */
+.pdf-page.own-font { --pdf-ink: #1f1d1a; }
+.reader.sepia .pdf-page.own-font { --pdf-ink: #4a3a28; }
+.reader.dark .pdf-page.own-font { --pdf-ink: #d6d2c9; }
+.pdf-page.own-font .textLayer span, .pdf-page.own-font .textLayer ::selection { color: var(--pdf-ink); }
+
 .r-loading { position: absolute; inset: 0; display: grid; place-items: center; color: var(--r-muted); pointer-events: none; }
 .r-loading .spinner { width: 22px; height: 22px; }
 .r-error { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 12px; padding: 24px; color: var(--r-muted); }
@@ -178,7 +185,7 @@
 }
 .reader :is(textarea, .r-search-form input):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .reader .seg { display: flex; border: 1px solid var(--r-line); border-radius: 10px; padding: 3px; gap: 3px; }
-.reader .seg button { flex: 1; height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--r-muted); font-size: 13px; }
+.reader .seg button { flex: 1; height: 30px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--r-muted); font-size: 13px; white-space: nowrap; }
 .reader .seg button:hover { color: var(--r-fg); }
 .reader .seg button[aria-pressed="true"] { background: var(--r-hover); color: var(--r-fg); font-weight: 600; }
 
@@ -253,6 +260,7 @@
 }
 .r-pop .row { display: flex; align-items: center; gap: 8px; }
 .r-pop .label { font-size: 12px; color: var(--r-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.r-pop-note { margin: 8px 0 0; font-size: 12px; line-height: 1.4; color: var(--r-muted); }
 .r-pop .swatch {
   flex: 1; height: 40px; border-radius: 10px; border: 1px solid var(--r-line); font: 600 14px var(--serif);
 }

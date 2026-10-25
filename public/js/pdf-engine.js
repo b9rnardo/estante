@@ -41,6 +41,61 @@ function textRects(range, root) {
   return out;
 }
 
+// A PDF's own fonts can be hard to read. With another font (Aa › Fonte, kept per book), the page
+// is drawn without its text, and the text layer, already laid over it for selection and search,
+// shows that text in the chosen font, each run stretched to the width of the original.
+const fontFamily = (font) => (font === 'serif' || font === 'sans'
+  ? getComputedStyle(document.documentElement).getPropertyValue(`--${font}`).trim() || null
+  : null);
+
+// The page's text content with every font swapped for `family`, which the text layer then
+// measures and shows.
+const withFont = (content, family) => ({
+  ...content,
+  styles: Object.fromEntries(Object.entries(content.styles).map(([name, s]) => [name, { ...s, fontFamily: family }])),
+});
+
+// pdf.js stretches each run to its width in the PDF by measuring it on a canvas, and WebKit (the
+// iOS app) measures the system font there up to 15% narrower than it shows it. Once the runs are
+// on screen, measure them there and stretch them again. Rotated runs keep pdf.js's stretch.
+function fitRuns(divs, items, scale) {
+  const fits = [];
+  divs.forEach((div, i) => {
+    const stretch = Number(div.style.getPropertyValue('--scale-x'));
+    if (!stretch || !div.isConnected || div.style.getPropertyValue('--rotate')) return;
+    const { width } = div.getBoundingClientRect();
+    const target = items[i].width * scale;
+    if (width > 0 && target > 0) fits.push([div, (stretch * target) / width]);
+  });
+  for (const [div, stretch] of fits) div.style.setProperty('--scale-x', stretch);
+}
+
+// pdf.js operator filter that leaves out the page's text. Annotations (form fields) keep
+// theirs, since the text layer doesn't have it. `shown()` counts the text runs left out that
+// were visible: none means a scan, whose OCR text is invisible and whose image already shows it.
+function withoutText(OPS) {
+  const TEXT = new Set([OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText]);
+  const INVISIBLE = new Set([3, 7]); // text rendering modes that paint nothing
+  const modes = [];
+  let mode = 0;
+  let annotation = 0;
+  let visible = 0;
+  const filter = (i, { fnArray, argsArray }) => {
+    const fn = fnArray[i];
+    if (fn === OPS.setTextRenderingMode) mode = argsArray[i][0];
+    else if (fn === OPS.save) modes.push(mode);
+    else if (fn === OPS.restore) mode = modes.pop() ?? 0;
+    else if (fn === OPS.beginAnnotation) annotation++;
+    else if (fn === OPS.endAnnotation) annotation--;
+    else if (TEXT.has(fn) && annotation <= 0) {
+      if (!INVISIBLE.has(mode)) visible++;
+      return false;
+    }
+    return true;
+  };
+  return { filter, shown: () => visible > 0 };
+}
+
 export async function openPdf({ el, book, appearance, onRelocate, onTap, onSwipe, onSelect, onMarkClick }) {
   const pdfjs = await loadPdf();
   const loading = pdfjs.getDocument({ url: fileUrl(book), ...PDF_OPTIONS });
@@ -48,6 +103,7 @@ export async function openPdf({ el, book, appearance, onRelocate, onTap, onSwipe
   const total = doc.numPages;
   let pageNum = Math.min(Math.max(1, book.progress?.page ?? 1), total);
   let zoom = appearance.pdfZoom ?? 'page'; // 'page' | 'width' | number (CSS scale)
+  let font = book.pdfFont ?? 'original'; // 'original' | 'serif' | 'sans'
   let scale = 1;
   let task = null;
   let seq = 0;
@@ -177,10 +233,17 @@ export async function openPdf({ el, book, appearance, onRelocate, onTap, onSwipe
     textEl.style.setProperty('--scale-round-x', '1px');
     textEl.style.setProperty('--scale-round-y', '1px');
     const text = await pageText(pageNum).catch(() => null);
-    const textLayer = text && new pdfjs.TextLayer({ textContentSource: text.content, container: textEl, viewport: cssViewport });
+    // Without a text layer to show it, the page keeps its own text.
+    const family = text?.content.items.length ? fontFamily(font) : null;
+    const textLayer = text && new pdfjs.TextLayer({
+      textContentSource: family ? withFont(text.content, family) : text.content,
+      container: textEl,
+      viewport: cssViewport,
+    });
+    const strip = family && withoutText(pdfjs.OPS);
 
     task?.cancel();
-    task = page.render({ canvas, viewport });
+    task = page.render({ canvas, viewport, ...(strip && { operationsFilter: strip.filter }) });
     try {
       await Promise.all([task.promise, textLayer?.render()]);
     } catch (err) {
@@ -192,7 +255,10 @@ export async function openPdf({ el, book, appearance, onRelocate, onTap, onSwipe
     end.className = 'endOfContent';
     textEl.append(end);
     layer = { el: textEl, divs: textLayer?.textDivs ?? [], text };
+    wrap.classList.toggle('own-font', !!strip?.shown());
     wrap.replaceChildren(canvas, marks, textEl);
+    // The text layer keeps one run per text item, in order.
+    if (strip?.shown()) fitRuns(layer.divs, text.content.items.filter((it) => it.str !== undefined), scale);
     drawMarks();
     report();
     if (pageNum < total) doc.getPage(pageNum + 1).catch(() => {}); // warm up the next page
@@ -320,6 +386,11 @@ export async function openPdf({ el, book, appearance, onRelocate, onTap, onSwipe
         zoom = a.pdfZoom;
         draw();
       }
+    },
+    setFont(f) {
+      if (f === font) return;
+      font = f;
+      draw();
     },
     // Zoom steps from whatever the current fit resolves to.
     zoomBy(factor) {

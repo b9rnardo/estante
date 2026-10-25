@@ -149,7 +149,7 @@ async function showLibrary() {
   if (!library.length) {
     // A phone or tablet can't drop a file on the page; it imports with the + button.
     const add = matchMedia('(hover: none)').matches ? 'toque em + para importar um EPUB ou PDF' : 'arraste um EPUB ou PDF para esta janela';
-    view.innerHTML = `
+    view.innerHTML = `${updateHTML()}
       <section class="empty">
         <h2>Sua estante está vazia</h2>
         <p>Busque um título lá em cima ou ${add}.</p>
@@ -159,7 +159,7 @@ async function showLibrary() {
   }
   // The server lists the most recently opened first.
   const current = library.find((b) => b.lastOpenedAt && !isRead(b) && pctOf(b) < 0.98);
-  view.innerHTML = `
+  view.innerHTML = `${updateHTML()}
     ${current ? continueHTML(current) : ''}
     <nav class="chips shelf-chips" aria-label="Organizar a estante"></nav>
     <div class="section-title shelf-title">
@@ -228,6 +228,32 @@ function renderShelf() {
   const card = focusId && grid.querySelector(`.book[data-id="${focusId}"]`);
   if (card) (focused.matches('.book-menu') ? card.querySelector('.book-menu') : card).focus({ preventScroll: true });
 }
+
+// Desktop app: a newer release on GitHub (electron/main.js), until dismissed for that version.
+const UPDATE_KEY = 'estante.dismissedUpdate';
+let update = null; // { version, url }
+
+function updateHTML() {
+  let dismissed = null;
+  try { dismissed = localStorage.getItem(UPDATE_KEY); } catch { /* ignore */ }
+  if (!update || update.version === dismissed) return '';
+  // The link opens in the default browser, like every link that leaves the app (electron/main.js).
+  return `
+    <aside class="update" aria-label="Nova versão">
+      <svg class="icon" aria-hidden="true"><use href="#i-export"/></svg>
+      <span>Estante ${esc(update.version)} disponível</span>
+      <a class="btn primary" href="${esc(update.url)}" target="_blank" rel="noopener">Baixar</a>
+      <button class="icon-btn" data-dismiss-update title="Dispensar" aria-label="Dispensar aviso"><svg class="icon"><use href="#i-x"/></svg></button>
+    </aside>`;
+}
+
+window.estante?.onUpdate?.((u) => {
+  update = u;
+  if (view.dataset.view !== 'library') return;
+  view.querySelector('.update')?.remove();
+  const notice = updateHTML();
+  if (notice) view.prepend(el(notice));
+});
 
 function refreshCover(b) {
   const i = library.findIndex((x) => x.id === b.id);
@@ -461,6 +487,10 @@ view.addEventListener('click', async (e) => {
     return renderShelf();
   }
   if (e.target.closest('[data-new-collection]')) return newCollection();
+  if (e.target.closest('[data-dismiss-update]')) {
+    try { localStorage.setItem(UPDATE_KEY, update.version); } catch { /* ignore */ }
+    return view.querySelector('.update')?.remove();
+  }
 
   const menuButton = e.target.closest('[data-book-menu], [data-sort-menu], [data-collection-menu]');
   if (menuButton) {

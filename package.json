@@ -1,7 +1,7 @@
 {
   "name": "estante",
   "productName": "Estante",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Leitor de e-books minimalista que busca EPUBs e PDFs em acervos abertos",
   "type": "module",
   "main": "electron/main.js",
@@ -12,7 +12,8 @@
     "dist:win": "electron-builder --win nsis --x64 --publish never",
     "ios": "node mobile/build.mjs && cap sync ios",
     "ipa": "npm run ios && node mobile/ipa.mjs",
-    "source": "node mobile/source.mjs"
+    "source": "node mobile/source.mjs",
+    "release": "node scripts/release.mjs"
   },
   "engines": {
     "node": ">=20.11"

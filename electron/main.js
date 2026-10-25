@@ -29,7 +29,41 @@ async function boot() {
   if (!app.isPackaged) app.dock?.setIcon(ICON);
   Menu.setApplicationMenu(menu());
   createWindow();
+  checkForUpdate();
+  // Hourly, against the clock: a timer set for a day falls behind while the computer sleeps.
+  setInterval(() => { if (Date.now() - checkedAt >= DAY) checkForUpdate(); }, 60 * 60 * 1000);
 }
+
+// The app can't update itself (it isn't signed), so the shelf shows a notice when GitHub has a
+// newer release, with a link to its page (public/js/app.js, through preload.cjs).
+const RELEASES = 'https://api.github.com/repos/b9rnardo/estante/releases/latest';
+const DAY = 24 * 60 * 60 * 1000;
+let update = null; // { version, url } of a newer release
+let checkedAt = 0;
+
+const semver = (v) => String(v).match(/^v?(\d+)\.(\d+)\.(\d+)/)?.slice(1).map(Number);
+
+async function checkForUpdate() {
+  checkedAt = Date.now();
+  try {
+    const res = await fetch(RELEASES, {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Estante/${app.getVersion()}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return; // 404 until the first release
+    const { tag_name: tag, html_url: url } = await res.json();
+    const latest = semver(tag);
+    const current = semver(app.getVersion());
+    if (!latest || !current || !/^https:\/\//.test(url)) return;
+    const i = latest.findIndex((n, j) => n !== current[j]);
+    if (i === -1 || latest[i] < current[i]) return;
+    update = { version: latest.join('.'), url };
+    win?.webContents.send('update', update);
+  } catch { /* offline, or GitHub didn't answer: nothing to show until the next check */ }
+}
+
+// For a page that loads after the check (a reload, or a window reopened from the Dock).
+ipcMain.handle('update', () => update);
 
 const openOutside = (url) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); };
 
@@ -51,7 +85,7 @@ function createWindow() {
       ? { height: 52 }
       : { height: 52, color: dark ? '#141413' : '#faf9f6', symbolColor: dark ? '#ecebe6' : '#1c1b19' }, // --bg, --text
     trafficLightPosition: { x: 18, y: 18 }, // y is ignored: the overlay height centers them
-    ...(!MAC && { webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') } }),
+    webPreferences: { preload: path.join(import.meta.dirname, 'preload.cjs') },
     // The packaged app has its icon in the .exe; `npm run app` on Windows/Linux needs it here.
     ...(!MAC && !app.isPackaged && { icon: ICON }),
     show: false,

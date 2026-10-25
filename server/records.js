@@ -56,12 +56,20 @@ function mark(m, withText) {
 }
 const marks = (list, max, withText) => list.slice(0, max).map((m) => mark(m, withText)).filter(Boolean);
 
+// The font a PDF's text is redrawn in (pdf-engine.js), for a book whose own fonts are hard to
+// read. Without one, the PDF shows its own.
+const PDF_FONTS = ['serif', 'sans'];
+
 // Only fields the reader and the shelf legitimately change. `collections` are the ones that
 // exist, so a book can't be put in a collection that was deleted meanwhile.
 export function applyPatch(b, patch, collections) {
   const now = new Date().toISOString();
   if (patch.progress !== undefined) b.progress = patch.progress && { ...patch.progress, updatedAt: now };
   if (patch.opened) b.lastOpenedAt = now;
+  if (patch.pdfFont !== undefined) {
+    if (b.format === 'pdf' && PDF_FONTS.includes(patch.pdfFont)) b.pdfFont = patch.pdfFont;
+    else delete b.pdfFont;
+  }
   if (typeof patch.title === 'string' && patch.title.trim()) b.title = patch.title.trim().slice(0, 300);
   if (Array.isArray(patch.authors)) b.authors = patch.authors.map((a) => String(a).trim()).filter(Boolean).slice(0, 5);
   if (Array.isArray(patch.bookmarks)) b.bookmarks = marks(patch.bookmarks, 2000, false);
